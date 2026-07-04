@@ -152,6 +152,56 @@ describe("openclaw osint tools", () => {
     assert.equal(plan.commands.includes("traceroute 203.0.113.42"), true);
   });
 
+  it("correlates DNS, BGP, and traceroute plan into network paths", () => {
+    const dns = [{ family: 4, address: "104.20.23.154", ttl: 300 }];
+    const bgp = [
+      {
+        asn: "13335",
+        ip: "104.20.23.154",
+        prefix: "104.20.16.0/20",
+        countryCode: "US",
+        registry: "ARIN",
+        allocated: "0001-01-01",
+        asName: "Cloudflare, Inc.",
+      },
+    ];
+    const trace = domainNetworkTesting.traceroutePlan("example.com", dns);
+
+    assert.deepEqual(domainNetworkTesting.summarizeNetworkIntel(dns, bgp, true), {
+      resolvedIpCount: 1,
+      dnsFamilies: [4],
+      bgpResolvedCount: 1,
+      bgpErrorCount: 0,
+      asnCount: 1,
+      primaryAsns: ["AS13335 Cloudflare, Inc."],
+      networkShape: "cdn_or_anycast_likely",
+      tracerouteAvailable: "operator_plan_only",
+    });
+    assert.deepEqual(domainNetworkTesting.correlateNetworkPaths(dns, bgp, trace), [
+      {
+        ip: "104.20.23.154",
+        dns: { family: 4, ttl: 300 },
+        bgp: {
+          asn: "13335",
+          prefix: "104.20.16.0/20",
+          asName: "Cloudflare, Inc.",
+          countryCode: "US",
+          registry: "ARIN",
+          allocated: "0001-01-01",
+        },
+        trace: {
+          automated: false,
+          status: "not_run",
+          operatorCommand: "traceroute 104.20.23.154",
+        },
+        assessment: {
+          role: "edge_or_cdn_endpoint",
+          confidence: 0.75,
+        },
+      },
+    ]);
+  });
+
   it("normalizes HIBP email input without accepting malformed addresses", () => {
     assert.equal(hibpTesting.normalizeEmail(" USER@Example.COM "), "user@example.com");
     assert.equal(hibpTesting.normalizeEmail("not-an-email"), undefined);

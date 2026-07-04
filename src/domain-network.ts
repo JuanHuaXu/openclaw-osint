@@ -65,12 +65,15 @@ export async function queryDomainNetworkIntelForTool(
     for (const ip of dnsRecords.map((record) => record.address)) {
       bgp.push(await queryBgpToolsWithCache(ip, cache, Boolean(params.refresh)));
     }
+    const traceroute = params.includeTraceroutePlan ? traceroutePlan(domain, dnsRecords) : undefined;
     return {
       ok: true,
       domain,
       dns: dnsRecords,
       bgp,
-      traceroute: params.includeTraceroutePlan ? traceroutePlan(domain, dnsRecords) : undefined,
+      summary: summarizeNetworkIntel(dnsRecords, bgp, Boolean(traceroute)),
+      correlatedPaths: correlateNetworkPaths(dnsRecords, bgp, traceroute),
+      traceroute,
       sources: [
         "local DNS resolver",
         "bgp.tools WHOIS automation interface on TCP/43",
@@ -184,6 +187,99 @@ function parseBgpToolsWhois(input: string): BgpToolsRow {
   };
 }
 
+function summarizeNetworkIntel(
+  records: ReadonlyArray<{ family: 4 | 6; address: string }>,
+  bgp: ReadonlyArray<BgpToolsRow | { ip: string; error: string }>,
+  hasTraceroutePlan: boolean,
+) {
+  const successful = bgp.filter(isBgpToolsRow);
+  const asns = Array.from(new Map(successful.map((row) => [row.asn, row])).values());
+  const families = Array.from(new Set(records.map((record) => record.family))).sort();
+  return {
+    resolvedIpCount: records.length,
+    dnsFamilies: families,
+    bgpResolvedCount: successful.length,
+    bgpErrorCount: bgp.length - successful.length,
+    asnCount: asns.length,
+    primaryAsns: asns.map((row) => `AS${row.asn} ${row.asName}`),
+    networkShape: inferNetworkShape(records, successful),
+    tracerouteAvailable: hasTraceroutePlan ? "operator_plan_only" : "not_requested",
+  };
+}
+
+function correlateNetworkPaths(
+  records: ReadonlyArray<{ family: 4 | 6; address: string; ttl?: number }>,
+  bgp: ReadonlyArray<BgpToolsRow | { ip: string; error: string }>,
+  traceroute?: ReturnType<typeof traceroutePlan>,
+) {
+  return records.map((record) => {
+    const bgpRow = bgp.find((row) => row.ip === record.address);
+    const bgpValue = bgpRow
+      ? isBgpToolsRow(bgpRow)
+        ? {
+            asn: bgpRow.asn,
+            prefix: bgpRow.prefix,
+            asName: bgpRow.asName,
+            countryCode: bgpRow.countryCode,
+            registry: bgpRow.registry,
+            allocated: bgpRow.allocated,
+          }
+        : { error: bgpRow.error }
+      : undefined;
+    return {
+      ip: record.address,
+      dns: {
+        family: record.family,
+        ...(record.ttl !== undefined ? { ttl: record.ttl } : {}),
+      },
+      ...(bgpValue ? { bgp: bgpValue } : {}),
+      trace: {
+        automated: false,
+        status: "not_run",
+        ...(traceroute?.commands.includes(`traceroute ${record.address}`)
+          ? { operatorCommand: `traceroute ${record.address}` }
+          : {}),
+      },
+      assessment: assessPathRole(bgpValue),
+    };
+  });
+}
+
+function inferNetworkShape(
+  records: ReadonlyArray<{ family: 4 | 6 }>,
+  bgp: ReadonlyArray<BgpToolsRow>,
+): string {
+  const asnNames = bgp.map((row) => row.asName.toLowerCase());
+  if (asnNames.some((name) => /cloudflare|akamai|fastly|cloudfront|cdn|edgecast|bunny/.test(name))) {
+    return "cdn_or_anycast_likely";
+  }
+  if (new Set(bgp.map((row) => row.asn)).size > 1) {
+    return "multi_asn_hosting";
+  }
+  if (records.some((record) => record.family === 4) && records.some((record) => record.family === 6)) {
+    return "dual_stack_single_network";
+  }
+  return bgp.length > 0 ? "single_network" : "dns_only";
+}
+
+function assessPathRole(bgp?: { asName?: string; error?: string }) {
+  if (!bgp || bgp.error) {
+    return { role: "unclassified", confidence: 0.1 };
+  }
+  const asName = bgp.asName?.toLowerCase() ?? "";
+  if (/cloudflare|akamai|fastly|cloudfront|cdn|edgecast|bunny/.test(asName)) {
+    return { role: "edge_or_cdn_endpoint", confidence: 0.75 };
+  }
+  if (/hosting|cloud|amazon|google|microsoft|digitalocean|linode|hetzner/.test(asName)) {
+    return { role: "cloud_or_hosting_endpoint", confidence: 0.65 };
+  }
+  return { role: "network_endpoint", confidence: 0.45 };
+}
+
+function isBgpToolsRow(row: BgpToolsRow | { ip: string; error: string }): row is BgpToolsRow {
+  return "asn" in row;
+}
+
 function traceroutePlan(
   domain: string,
   records: ReadonlyArray<{ address: string }>,
@@ -231,7 +327,10 @@ function formatError(error: unknown): string {
 }
 
 export const testing = {
+  correlateNetworkPaths,
+  inferNetworkShape,
   normalizeDomain,
   parseBgpToolsWhois,
+  summarizeNetworkIntel,
   traceroutePlan,
 };

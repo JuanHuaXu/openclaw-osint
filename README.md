@@ -53,6 +53,7 @@ Sources and behavior:
 - queries the supported bgp.tools WHOIS automation interface on TCP/43
 - caches bgp.tools WHOIS rows locally
 - returns ASN, BGP prefix, country, registry, allocation date, and AS name per IP
+- returns a correlated `summary` and `correlatedPaths` view joining DNS, BGP, and trace-plan data
 - can include an operator-side traceroute plan
 - does not run traceroute or shell commands itself
 
@@ -148,7 +149,7 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.5.0.tgz
+openclaw plugins install ./openclaw-osint-0.5.1.tgz
 ```
 
 Restart the OpenClaw gateway after install.
