@@ -1,6 +1,6 @@
 {
   "id": "osint",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "activation": {
     "onStartup": true
   },
@@ -17,7 +17,10 @@
       "osint_extract_indicators",
       "osint_url_snapshot",
       "osint_crtsh_domain",
-      "osint_cache_status"
+      "osint_cache_status",
+      "osint_hibp_email_breach",
+      "osint_hibp_latest_breach",
+      "osint_pwned_password_hash"
     ]
   }
 }

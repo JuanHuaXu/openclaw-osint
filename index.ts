@@ -6,6 +6,14 @@ import {
   queryCrtshDomainForTool,
 } from "./src/crtsh.js";
 import {
+  HibpEmailBreachSchema,
+  HibpLatestBreachSchema,
+  PwnedPasswordHashSchema,
+  queryHibpEmailBreachForTool,
+  queryHibpLatestBreachForTool,
+  queryPwnedPasswordHashForTool,
+} from "./src/hibp.js";
+import {
   ExtractIndicatorsSchema,
   UrlSnapshotSchema,
   extractIndicatorsForTool,
@@ -50,6 +58,33 @@ export default defineToolPlugin({
         "Show bounded local OSINT cache counts and byte totals without exposing cached raw data.",
       parameters: OsintCacheStatusSchema,
       execute: osintCacheStatusForTool,
+    }),
+    tool({
+      name: "osint_hibp_email_breach",
+      label: "OSINT HIBP Email Breach",
+      description:
+        "Check an email address against Have I Been Pwned when HIBP_API_KEY is configured. Does not store raw email addresses in the local cache.",
+      parameters: HibpEmailBreachSchema,
+      execute: (params, _config, context) =>
+        queryHibpEmailBreachForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_hibp_latest_breach",
+      label: "OSINT HIBP Latest Breach",
+      description:
+        "Fetch the latest Have I Been Pwned breach metadata as a cheap preflight before account checks.",
+      parameters: HibpLatestBreachSchema,
+      execute: (params, _config, context) =>
+        queryHibpLatestBreachForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_pwned_password_hash",
+      label: "OSINT Pwned Password Hash",
+      description:
+        "Check a SHA-1 or NTLM password hash with the Have I Been Pwned k-anonymity range API. Never pass plaintext passwords.",
+      parameters: PwnedPasswordHashSchema,
+      execute: (params, _config, context) =>
+        queryPwnedPasswordHashForTool({ ...params, signal: context.signal }),
     }),
   ],
 });

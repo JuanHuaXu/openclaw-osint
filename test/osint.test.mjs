@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { OsintCache } from "../dist/src/cache.js";
 import { testing as crtshTesting } from "../dist/src/crtsh.js";
+import { testing as hibpTesting } from "../dist/src/hibp.js";
 import { testing } from "../dist/src/tools.js";
 
 describe("openclaw osint tools", () => {
@@ -119,5 +120,77 @@ describe("openclaw osint tools", () => {
       cache.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("normalizes HIBP email input without accepting malformed addresses", () => {
+    assert.equal(hibpTesting.normalizeEmail(" USER@Example.COM "), "user@example.com");
+    assert.equal(hibpTesting.normalizeEmail("not-an-email"), undefined);
+  });
+
+  it("normalizes only SHA-1 or NTLM password hashes", () => {
+    assert.deepEqual(
+      hibpTesting.normalizePasswordHash(
+        "21BD12DC183F740EE76F27B78EB39C8AD972A757",
+        "auto",
+      ),
+      {
+        algorithm: "sha1",
+        prefix: "21BD1",
+        suffix: "2DC183F740EE76F27B78EB39C8AD972A757",
+      },
+    );
+    assert.deepEqual(
+      hibpTesting.normalizePasswordHash("8846F7EAEE8FB117AD06BDD830B7586C", "ntlm"),
+      {
+        algorithm: "ntlm",
+        prefix: "8846F",
+        suffix: "7EAEE8FB117AD06BDD830B7586C",
+      },
+    );
+    assert.equal(hibpTesting.normalizePasswordHash("plaintext-password", "auto"), undefined);
+    assert.equal(
+      hibpTesting.normalizePasswordHash("8846F7EAEE8FB117AD06BDD830B7586C", "sha1"),
+      undefined,
+    );
+  });
+
+  it("parses pwned password suffix ranges", () => {
+    const suffixes = hibpTesting.parsePwnedPasswordSuffixes(`
+      2DC183F740EE76F27B78EB39C8AD972A757:42
+      00000000000000000000000000000000000:0
+      not-a-suffix
+    `);
+
+    assert.equal(suffixes.get("2DC183F740EE76F27B78EB39C8AD972A757"), 42);
+    assert.equal(suffixes.get("00000000000000000000000000000000000"), 0);
+    assert.equal(suffixes.has("NOT-A-SUFFIX"), false);
+  });
+
+  it("summarizes HIBP breach JSON without HTML descriptions", () => {
+    const breaches = hibpTesting.parseHibpBreaches(JSON.stringify([
+      {
+        Name: "ExampleBreach",
+        Title: "Example Breach",
+        Domain: "example.com",
+        Description: "<strong>do not replay</strong>",
+        DataClasses: ["Email addresses", "Passwords"],
+        IsVerified: true,
+      },
+    ]));
+
+    assert.deepEqual(hibpTesting.publicBreachSummary(breaches[0]), {
+      name: "ExampleBreach",
+      title: "Example Breach",
+      domain: "example.com",
+      breachDate: "",
+      addedDate: "",
+      modifiedDate: "",
+      dataClasses: ["Email addresses", "Passwords"],
+      isVerified: true,
+      isFabricated: false,
+      isSensitive: false,
+      isRetired: false,
+      isSpamList: false,
+    });
   });
 });
