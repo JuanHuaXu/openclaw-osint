@@ -1,0 +1,21 @@
+{
+  "id": "osint",
+  "version": "0.1.0",
+  "activation": {
+    "onStartup": true
+  },
+  "enabledByDefault": true,
+  "name": "OSINT",
+  "description": "Public-source OSINT helper tools with guarded fetching and indicator extraction.",
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "contracts": {
+    "tools": [
+      "osint_extract_indicators",
+      "osint_url_snapshot"
+    ]
+  }
+}
