@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { OsintCache } from "../dist/src/cache.js";
 import { testing as crtshTesting } from "../dist/src/crtsh.js";
+import { testing as domainNetworkTesting } from "../dist/src/domain-network.js";
 import { testing as hibpTesting } from "../dist/src/hibp.js";
 import { testing as reputationTesting } from "../dist/src/reputation.js";
 import { testing } from "../dist/src/tools.js";
@@ -121,6 +122,34 @@ describe("openclaw osint tools", () => {
       cache.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("parses bgp.tools WHOIS rows", () => {
+    assert.deepEqual(
+      domainNetworkTesting.parseBgpToolsWhois(`
+        AS      | IP               | BGP Prefix          | CC | Registry | Allocated  | AS Name
+        13335   | 1.1.1.1          | 1.1.1.0/24          | US | ARIN     | 0001-01-01 | Cloudflare, Inc.
+      `),
+      {
+        asn: "13335",
+        ip: "1.1.1.1",
+        prefix: "1.1.1.0/24",
+        countryCode: "US",
+        registry: "ARIN",
+        allocated: "0001-01-01",
+        asName: "Cloudflare, Inc.",
+      },
+    );
+  });
+
+  it("keeps traceroute as an operator-side plan", () => {
+    const plan = domainNetworkTesting.traceroutePlan("example.com", [
+      { address: "203.0.113.42" },
+    ]);
+
+    assert.equal(plan.automated, false);
+    assert.equal(plan.commands.includes("traceroute example.com"), true);
+    assert.equal(plan.commands.includes("traceroute 203.0.113.42"), true);
   });
 
   it("normalizes HIBP email input without accepting malformed addresses", () => {

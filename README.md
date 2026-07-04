@@ -43,6 +43,19 @@ Returns:
 
 The tool stores scoped observations in a local SQLite cache and drops names that do not match the requested domain suffix.
 
+### `osint_domain_network_intel`
+
+Resolves a domain and enriches the returned IPs with passive network ownership data.
+
+Sources and behavior:
+
+- uses the local DNS resolver for A/AAAA records
+- queries the supported bgp.tools WHOIS automation interface on TCP/43
+- caches bgp.tools WHOIS rows locally
+- returns ASN, BGP prefix, country, registry, allocation date, and AS name per IP
+- can include an operator-side traceroute plan
+- does not run traceroute or shell commands itself
+
 ### `osint_cache_status`
 
 Reports local OSINT cache counts and byte totals without exposing cached raw data.
@@ -121,6 +134,7 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 - default path: OpenClaw user state under `state/plugins/osint/osint.sqlite`
 - override path: `OPENCLAW_OSINT_DB_PATH`
 - `crt.sh` cache TTL: 24 hours
+- bgp.tools WHOIS cache TTL: 6 hours
 - HIBP email cache TTL: 24 hours
 - HIBP latest breach cache TTL: 1 hour
 - FTC phone reputation cache TTL: 6 hours
@@ -134,7 +148,7 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.4.0.tgz
+openclaw plugins install ./openclaw-osint-0.5.0.tgz
 ```
 
 Restart the OpenClaw gateway after install.

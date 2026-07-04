@@ -6,6 +6,10 @@ import {
   queryCrtshDomainForTool,
 } from "./src/crtsh.js";
 import {
+  DomainNetworkIntelSchema,
+  queryDomainNetworkIntelForTool,
+} from "./src/domain-network.js";
+import {
   HibpEmailBreachSchema,
   HibpLatestBreachSchema,
   PwnedPasswordHashSchema,
@@ -58,6 +62,14 @@ export default defineToolPlugin({
       parameters: CrtshDomainSchema,
       execute: (params, _config, context) =>
         queryCrtshDomainForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_domain_network_intel",
+      label: "OSINT Domain Network Intel",
+      description:
+        "Resolve a domain and enrich its IPs with bgp.tools WHOIS BGP ownership data. Includes an operator-side traceroute plan when requested, but does not run traceroute.",
+      parameters: DomainNetworkIntelSchema,
+      execute: queryDomainNetworkIntelForTool,
     }),
     tool({
       name: "osint_cache_status",

@@ -1,6 +1,6 @@
 {
   "id": "osint",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "activation": {
     "onStartup": true
   },
@@ -17,6 +17,7 @@
       "osint_extract_indicators",
       "osint_url_snapshot",
       "osint_crtsh_domain",
+      "osint_domain_network_intel",
       "osint_cache_status",
       "osint_hibp_email_breach",
       "osint_hibp_latest_breach",
