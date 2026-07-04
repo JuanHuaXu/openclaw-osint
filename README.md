@@ -76,6 +76,43 @@ Requirements and behavior:
 - checks the suffix locally
 - does not store searched hashes
 
+### `osint_phone_reputation`
+
+Checks a US phone number against FTC Do Not Call reported-call complaint data.
+
+Requirements and behavior:
+
+- requires `FTC_API_KEY`
+- supports US numbers only
+- fetches a bounded recent area-code sample and matches the number locally
+- returns complaint count, robocall count, subjects, dates, and caveats
+- treats FTC reports as unverified reputation evidence, not owner identity
+
+### `osint_infra_reputation`
+
+Checks IPv4 infrastructure against abuse reputation sources.
+
+Sources:
+
+- Spamhaus DROP IPv4 netblocks, cached locally
+- AbuseIPDB, when `ABUSEIPDB_API_KEY` is configured
+
+The result classifies service/spam infrastructure likelihood without identifying a private human owner.
+
+### `osint_bot_identity_assess`
+
+Combines explicit evidence into a bot/service identity assessment.
+
+Inputs can include:
+
+- platform bot/app/webhook metadata
+- official service-source evidence
+- phone complaint counts
+- Spamhaus listing state
+- AbuseIPDB confidence score
+
+Outputs include owner-class hints, confidence, evidence, allowed actions, and blocked actions. Human identity resolution stays blocked even when spam/service evidence exists.
+
 ## Cache Behavior
 
 The plugin uses a bounded local SQLite cache for cacheable public sources.
@@ -85,6 +122,8 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 - `crt.sh` cache TTL: 24 hours
 - HIBP email cache TTL: 24 hours
 - HIBP latest breach cache TTL: 1 hour
+- FTC phone reputation cache TTL: 6 hours
+- Spamhaus DROP cache TTL: 12 hours
 - per-source cache pruning: latest 250 source targets
 - no shell execution, scanning, credentialed APIs, or private-data-broker lookups
 
@@ -94,7 +133,7 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.3.0.tgz
+openclaw plugins install ./openclaw-osint-0.4.0.tgz
 ```
 
 Restart the OpenClaw gateway after install.

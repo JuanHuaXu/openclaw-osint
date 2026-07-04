@@ -14,6 +14,14 @@ import {
   queryPwnedPasswordHashForTool,
 } from "./src/hibp.js";
 import {
+  BotIdentityAssessSchema,
+  InfraReputationSchema,
+  PhoneReputationSchema,
+  assessBotIdentityForTool,
+  queryInfraReputationForTool,
+  queryPhoneReputationForTool,
+} from "./src/reputation.js";
+import {
   ExtractIndicatorsSchema,
   UrlSnapshotSchema,
   extractIndicatorsForTool,
@@ -85,6 +93,32 @@ export default defineToolPlugin({
       parameters: PwnedPasswordHashSchema,
       execute: (params, _config, context) =>
         queryPwnedPasswordHashForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_phone_reputation",
+      label: "OSINT Phone Reputation",
+      description:
+        "Check a US phone number against bounded FTC unwanted-call complaint data. Requires FTC_API_KEY and does not identify private owners.",
+      parameters: PhoneReputationSchema,
+      execute: (params, _config, context) =>
+        queryPhoneReputationForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_infra_reputation",
+      label: "OSINT Infrastructure Reputation",
+      description:
+        "Check an IPv4 address against cached Spamhaus DROP and optional AbuseIPDB reputation. Requires ABUSEIPDB_API_KEY for AbuseIPDB.",
+      parameters: InfraReputationSchema,
+      execute: (params, _config, context) =>
+        queryInfraReputationForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_bot_identity_assess",
+      label: "OSINT Bot Identity Assessment",
+      description:
+        "Classify bot/service likelihood from explicit evidence without resolving private human identity.",
+      parameters: BotIdentityAssessSchema,
+      execute: assessBotIdentityForTool,
     }),
   ],
 });

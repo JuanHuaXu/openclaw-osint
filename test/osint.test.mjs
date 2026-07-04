@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import { OsintCache } from "../dist/src/cache.js";
 import { testing as crtshTesting } from "../dist/src/crtsh.js";
 import { testing as hibpTesting } from "../dist/src/hibp.js";
+import { testing as reputationTesting } from "../dist/src/reputation.js";
 import { testing } from "../dist/src/tools.js";
 
 describe("openclaw osint tools", () => {
@@ -192,5 +193,66 @@ describe("openclaw osint tools", () => {
       isRetired: false,
       isSpamList: false,
     });
+  });
+
+  it("normalizes US phone numbers for FTC reputation lookup", () => {
+    assert.deepEqual(reputationTesting.normalizeUsPhone("+1 (202) 555-0123"), {
+      e164: "+12025550123",
+      national: "2025550123",
+      areaCode: "202",
+    });
+    assert.equal(reputationTesting.normalizeUsPhone("+44 20 7946 0958"), undefined);
+  });
+
+  it("parses FTC complaint records without treating reports as verified identity", () => {
+    const complaints = reputationTesting.parseFtcComplaints(JSON.stringify({
+      data: [
+        {
+          id: "abc",
+          attributes: {
+            "company-phone-number": "2025550123",
+            "created-date": "2026-07-01 12:00:00",
+            "violation-date": "2026-07-01 11:00:00",
+            subject: "Computer & technical support",
+            "recorded-message-or-robocall": "Y",
+          },
+        },
+      ],
+    }));
+
+    assert.deepEqual(complaints, [
+      {
+        id: "abc",
+        phone: "2025550123",
+        createdDate: "2026-07-01 12:00:00",
+        violationDate: "2026-07-01 11:00:00",
+        subject: "Computer & technical support",
+        robocall: true,
+      },
+    ]);
+  });
+
+  it("matches IPv4 addresses against Spamhaus-style CIDR lists", () => {
+    const cidrs = reputationTesting.parseSpamhausDrop(`
+      ; comment
+      203.0.113.0/24 ; example
+      bad line
+    `);
+    assert.deepEqual(cidrs, ["203.0.113.0/24"]);
+    assert.equal(reputationTesting.findContainingCidr("203.0.113.42", cidrs), "203.0.113.0/24");
+    assert.equal(reputationTesting.findContainingCidr("198.51.100.42", cidrs), undefined);
+  });
+
+  it("assesses bot/service likelihood without permitting human doxxing actions", () => {
+    const result = reputationTesting.assessBotIdentityForTool({
+      subject: "example-service",
+      platformBot: true,
+      phoneComplaintCount: 4,
+      phoneRobocallCount: 2,
+    });
+
+    assert.equal(result.ownerClass, "bot_or_service_likely");
+    assert.equal(result.blockedActions.includes("human_identity_resolution"), true);
+    assert.equal(result.allowedActions.includes("public_service_attribution"), true);
   });
 });
