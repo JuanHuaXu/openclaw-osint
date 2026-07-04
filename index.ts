@@ -98,7 +98,7 @@ export default defineToolPlugin({
       name: "osint_phone_reputation",
       label: "OSINT Phone Reputation",
       description:
-        "Check a US phone number against bounded FTC unwanted-call complaint data. Requires FTC_API_KEY and does not identify private owners.",
+        "Normalize a US phone number and add bounded FTC unwanted-call complaint evidence when FTC_API_KEY is configured. Does not identify private owners.",
       parameters: PhoneReputationSchema,
       execute: (params, _config, context) =>
         queryPhoneReputationForTool({ ...params, signal: context.signal }),

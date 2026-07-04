@@ -82,7 +82,8 @@ Checks a US phone number against FTC Do Not Call reported-call complaint data.
 
 Requirements and behavior:
 
-- requires `FTC_API_KEY`
+- works without API keys for local US phone normalization
+- adds FTC complaint evidence when `FTC_API_KEY` is configured
 - supports US numbers only
 - fetches a bounded recent area-code sample and matches the number locally
 - returns complaint count, robocall count, subjects, dates, and caveats

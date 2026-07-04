@@ -81,6 +81,12 @@ type ReputationEvidence = {
   details?: Record<string, unknown>;
 };
 
+type SourceStatus = {
+  source: string;
+  status: "checked" | "missing_key" | "not_applicable" | "error";
+  detail?: string;
+};
+
 export async function queryPhoneReputationForTool(
   params: PhoneReputationParams & { signal?: AbortSignal; cache?: OsintCache },
 ) {
@@ -93,15 +99,25 @@ export async function queryPhoneReputationForTool(
     };
   }
   const apiKey = process.env.FTC_API_KEY?.trim();
+  const days = Math.min(Math.max(params.days ?? 14, 1), 30);
   if (!apiKey) {
-    return {
-      ok: false,
-      source: FTC_SOURCE,
-      error: "FTC_API_KEY is required for FTC DNC complaint lookup.",
-    };
+    return formatPhoneResult(phone, [], {
+      sourceStatuses: [
+        {
+          source: "local_normalization",
+          status: "checked",
+          detail: "US phone number was normalized locally.",
+        },
+        {
+          source: FTC_SOURCE,
+          status: "missing_key",
+          detail: "FTC_API_KEY is required for FTC DNC complaint lookup.",
+        },
+      ],
+      days,
+    });
   }
 
-  const days = Math.min(Math.max(params.days ?? 14, 1), 30);
   const target = `phone-us-sha256:${sha256Hex(phone.national)}`;
   const cache = params.cache ?? new OsintCache();
   const closeCache = !params.cache;
@@ -113,6 +129,10 @@ export async function queryPhoneReputationForTool(
         fetchedAt: fresh.fetchedAt,
         expiresAt: fresh.expiresAt,
         days,
+        sourceStatuses: [
+          { source: "local_normalization", status: "checked" },
+          { source: FTC_SOURCE, status: "checked", detail: "FTC DNC complaints served from local cache." },
+        ],
       });
     }
 
@@ -133,6 +153,10 @@ export async function queryPhoneReputationForTool(
       fetchedAt,
       expiresAt: fetchedAt + FTC_TTL_MS,
       days,
+      sourceStatuses: [
+        { source: "local_normalization", status: "checked" },
+        { source: FTC_SOURCE, status: "checked", detail: "FTC DNC complaints refreshed from API." },
+      ],
     });
   } catch (error) {
     return { ok: false, source: FTC_SOURCE, error: formatError(error) };
@@ -393,18 +417,26 @@ async function checkAbuseIpdb(ip: string, signal?: AbortSignal): Promise<Reputat
 function formatPhoneResult(
   phone: { e164: string; national: string },
   complaints: readonly FtcComplaint[],
-  meta: { cacheStatus: "hit" | "refreshed"; fetchedAt: number; expiresAt: number; days: number },
+  meta: {
+    cacheStatus?: "hit" | "refreshed";
+    fetchedAt?: number;
+    expiresAt?: number;
+    days: number;
+    sourceStatuses: readonly SourceStatus[];
+  },
 ) {
   const robocallCount = complaints.filter((complaint) => complaint.robocall).length;
   return {
     ok: true,
     source: FTC_SOURCE,
-    attribution: "Data from FTC Do Not Call reported-call complaints; reports are unverified.",
+    attribution:
+      "Local normalization is keyless. FTC data is from Do Not Call reported-call complaints when FTC_API_KEY is configured; reports are unverified.",
     phone: phone.e164,
-    cacheStatus: meta.cacheStatus,
-    fetchedAt: meta.fetchedAt,
-    expiresAt: meta.expiresAt,
+    ...(meta.cacheStatus ? { cacheStatus: meta.cacheStatus } : {}),
+    ...(meta.fetchedAt ? { fetchedAt: meta.fetchedAt } : {}),
+    ...(meta.expiresAt ? { expiresAt: meta.expiresAt } : {}),
     windowDays: meta.days,
+    sourceStatuses: meta.sourceStatuses,
     complaintCount: complaints.length,
     robocallCount,
     confidence: complaints.length === 0 ? 0.1 : Math.min(0.75, 0.35 + complaints.length * 0.03),
@@ -552,4 +584,5 @@ export const testing = {
   normalizeUsPhone,
   parseFtcComplaints,
   parseSpamhausDrop,
+  queryPhoneReputationForTool,
 };

@@ -204,6 +204,32 @@ describe("openclaw osint tools", () => {
     assert.equal(reputationTesting.normalizeUsPhone("+44 20 7946 0958"), undefined);
   });
 
+  it("returns keyless phone normalization when FTC key is unavailable", async () => {
+    const oldKey = process.env.FTC_API_KEY;
+    delete process.env.FTC_API_KEY;
+    try {
+      const result = await reputationTesting.queryPhoneReputationForTool({
+        phone: "+1 (202) 555-0123",
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.phone, "+12025550123");
+      assert.equal(result.complaintCount, 0);
+      assert.equal(
+        result.sourceStatuses.some(
+          (source) => source.source === "ftc-dnc" && source.status === "missing_key",
+        ),
+        true,
+      );
+    } finally {
+      if (oldKey === undefined) {
+        delete process.env.FTC_API_KEY;
+      } else {
+        process.env.FTC_API_KEY = oldKey;
+      }
+    }
+  });
+
   it("parses FTC complaint records without treating reports as verified identity", () => {
     const complaints = reputationTesting.parseFtcComplaints(JSON.stringify({
       data: [
