@@ -12,6 +12,9 @@ importers:
         specifier: 1.1.39
         version: 1.1.39
     devDependencies:
+      '@types/node':
+        specifier: ^26.0.0
+        version: 26.1.0
       openclaw:
         specifier: file:../openclaw
         version: file:../openclaw

@@ -1,6 +1,6 @@
 {
   "name": "openclaw-osint",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "description": "Public-source OSINT helper tools for OpenClaw",
   "type": "module",
@@ -27,6 +27,7 @@
     "typebox": "1.1.39"
   },
   "devDependencies": {
+    "@types/node": "^26.0.0",
     "openclaw": "file:../openclaw",
     "typescript": "^5.0.0"
   }

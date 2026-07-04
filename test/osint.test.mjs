@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
+import { OsintCache } from "../dist/src/cache.js";
+import { testing as crtshTesting } from "../dist/src/crtsh.js";
 import { testing } from "../dist/src/tools.js";
 
 describe("openclaw osint tools", () => {
@@ -51,5 +56,68 @@ describe("openclaw osint tools", () => {
       testing.normalizeCanonicalUrl("javascript:alert(1)", "https://example.com/root"),
       undefined,
     );
+  });
+
+  it("normalizes crt.sh rows into scoped observations", () => {
+    const rows = crtshTesting.parseCrtshRows(JSON.stringify([
+      {
+        id: 123,
+        common_name: "*.example.com",
+        name_value: "*.example.com\napi.example.com\nother.test",
+        issuer_name: "Example CA",
+      },
+    ]));
+    const observations = crtshTesting.observationsFromCrtshRows("example.com", rows, 1_700_000_000_000);
+
+    assert.deepEqual(
+      observations.map((observation) => observation.value),
+      ["example.com", "api.example.com"],
+    );
+    assert.equal(observations[0].sourceRef, "crtsh:123");
+    assert.equal(observations[0].storageTier, "full");
+  });
+
+  it("persists source records and observations in the SQLite cache", () => {
+    const dir = mkdtempSync(join(tmpdir(), "openclaw-osint-test-"));
+    const cache = new OsintCache(join(dir, "osint.sqlite"));
+    try {
+      cache.putSource({
+        source: "crtsh",
+        target: "example.com",
+        fetchedAt: 1000,
+        expiresAt: Date.now() + 60_000,
+        rawJson: "[]",
+        rawBytes: 2,
+        status: "ok",
+      });
+      cache.replaceObservations("crtsh", "example.com", [
+        {
+          id: "obs-1",
+          source: "crtsh",
+          target: "example.com",
+          type: "domain",
+          value: "api.example.com",
+          confidence: 0.82,
+          admissionScore: 0.82,
+          storageTier: "full",
+          observedAt: 1000,
+          sourceRef: "crtsh:1",
+        },
+      ]);
+
+      assert.equal(cache.getFreshSource("crtsh", "example.com")?.rawJson, "[]");
+      assert.equal(cache.listObservations("crtsh", "example.com", 10)[0]?.value, "api.example.com");
+      assert.deepEqual(cache.getStatus("crtsh"), {
+        source: "crtsh",
+        sourceRecords: 1,
+        observations: 1,
+        rawBytes: 2,
+        oldestFetchedAt: 1000,
+        newestFetchedAt: 1000,
+      });
+    } finally {
+      cache.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -1,6 +1,6 @@
 {
   "id": "osint",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "activation": {
     "onStartup": true
   },
@@ -15,7 +15,9 @@
   "contracts": {
     "tools": [
       "osint_extract_indicators",
-      "osint_url_snapshot"
+      "osint_url_snapshot",
+      "osint_crtsh_domain",
+      "osint_cache_status"
     ]
   }
 }

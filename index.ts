@@ -1,5 +1,11 @@
 import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
 import {
+  CrtshDomainSchema,
+  OsintCacheStatusSchema,
+  osintCacheStatusForTool,
+  queryCrtshDomainForTool,
+} from "./src/crtsh.js";
+import {
   ExtractIndicatorsSchema,
   UrlSnapshotSchema,
   extractIndicatorsForTool,
@@ -27,6 +33,23 @@ export default defineToolPlugin({
       parameters: UrlSnapshotSchema,
       execute: (params, _config, context) =>
         snapshotUrlForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_crtsh_domain",
+      label: "OSINT crt.sh Domain Lookup",
+      description:
+        "Query cached crt.sh certificate transparency data for subdomains of a public domain.",
+      parameters: CrtshDomainSchema,
+      execute: (params, _config, context) =>
+        queryCrtshDomainForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_cache_status",
+      label: "OSINT Cache Status",
+      description:
+        "Show bounded local OSINT cache counts and byte totals without exposing cached raw data.",
+      parameters: OsintCacheStatusSchema,
+      execute: osintCacheStatusForTool,
     }),
   ],
 });
