@@ -349,7 +349,8 @@ Checks a US phone number against FTC Do Not Call reported-call complaint data.
 Requirements and behavior:
 
 - works without API keys for local US phone normalization
-- adds FTC complaint evidence when `FTC_API_KEY` is configured
+- adds FTC complaint evidence when `FTC_API_KEY` is configured with a Data.gov API key
+- sends the FTC key with `X-Api-Key`, not in URLs
 - returns categorized source leads for public fraud-report and disposable/VoIP footprint checks
 - returns numbering-plan context and source leads for DID inventory, country-code references, and authenticated operator inventory checks
 - marks person-search and address-broker sources as blocked automation

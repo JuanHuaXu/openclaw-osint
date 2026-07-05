@@ -184,7 +184,8 @@ export async function queryBusinessReputationForTool(
 }
 
 async function queryFtcReleaseNotices(business: string, maxResults: number, signal?: AbortSignal) {
-  if (!process.env.FTC_API_KEY?.trim()) {
+  const apiKey = process.env.FTC_API_KEY?.trim();
+  if (!apiKey) {
     return {
       ok: false,
       source: FTC_RELEASE_NOTICES_SOURCE,
@@ -200,6 +201,7 @@ async function queryFtcReleaseNotices(business: string, maxResults: number, sign
         headers: {
           Accept: "application/vnd.api+json,application/json;q=0.9,*/*;q=0.1",
           "User-Agent": "Mozilla/5.0 (compatible; OpenClaw OSINT; +https://openclaw.ai)",
+          "X-Api-Key": apiKey,
         },
       },
       timeoutMs: LOOKUP_TIMEOUT_MS,
@@ -773,7 +775,6 @@ function observationsFromBusinessLookup(target: string, result: Awaited<ReturnTy
 
 function ftcReleaseNoticeApiUrl(business: string, maxResults: number): string {
   const url = new URL("https://api.ftc.gov/v0/node/rn");
-  url.searchParams.set("api_key", process.env.FTC_API_KEY?.trim() ?? "");
   url.searchParams.set("page[limit]", String(maxResults));
   url.searchParams.set("filter[title][condition][path]", "title");
   url.searchParams.set("filter[title][condition][operator]", "CONTAINS");
@@ -1552,6 +1553,7 @@ export const testing = {
   buildWorkplaceReviewLeads,
   canonicalBusinessName,
   chinaGsxtSearchUrl,
+  ftcReleaseNoticeApiUrl,
   japanCorporateNumberSearchUrl,
   japanGbizInfoSearchUrl,
   computeMarketMetrics,

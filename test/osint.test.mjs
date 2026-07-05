@@ -204,6 +204,9 @@ describe("openclaw osint tools", () => {
       date: "2026-01-02T00:00:00+00:00",
       url: "https://www.ftc.gov/news-events/news/press-releases/example",
     }]);
+    const ftcUrl = new URL(businessTesting.ftcReleaseNoticeApiUrl("Example Corp", 5));
+    assert.equal(ftcUrl.searchParams.has("api_key"), false);
+    assert.equal(ftcUrl.searchParams.get("filter[title][condition][value]"), "Example Corp");
     const bbbLinks = businessTesting.parseBbbProfileLinks(`
       <a href="/us/ca/example/profile/internet/example-corp-123">one</a>
       <a href="https://www.bbb.org/us/ca/example/profile/internet/example-corp-123">dup</a>
