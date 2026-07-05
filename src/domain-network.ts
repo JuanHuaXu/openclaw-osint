@@ -1,5 +1,5 @@
 import { promises as dns } from "node:dns";
-import { Socket } from "node:net";
+import { isIP, Socket } from "node:net";
 import { Type, type Static } from "typebox";
 import { OsintCache } from "./cache.js";
 
@@ -81,6 +81,36 @@ export async function queryDomainNetworkIntelForTool(
       ],
       caveat:
         "DNS and BGP data are point-in-time routing observations. CDN/anycast domains may return different IPs from other networks.",
+    };
+  } finally {
+    if (closeCache) {
+      cache.close();
+    }
+  }
+}
+
+export async function queryObservedIpsNetworkIntelForTool(
+  params: { ips: readonly string[]; refresh?: boolean; cache?: OsintCache },
+) {
+  const records = Array.from(new Set(params.ips.map(normalizeIp).filter(isString))).map((address) => ({
+    family: isIP(address) === 6 ? 6 as const : 4 as const,
+    address,
+  }));
+  const cache = params.cache ?? new OsintCache();
+  const closeCache = !params.cache;
+  try {
+    const bgp = [];
+    for (const ip of records.map((record) => record.address)) {
+      bgp.push(await queryBgpToolsWithCache(ip, cache, Boolean(params.refresh)));
+    }
+    return {
+      ok: true,
+      ips: records.map((record) => record.address),
+      bgp,
+      summary: summarizeNetworkIntel(records, bgp, false),
+      correlatedPaths: correlateNetworkPaths(records, bgp),
+      caveat:
+        "Observed SIP/RTP IPs are operator-supplied evidence. BGP data identifies routing/network ownership, not subscriber identity.",
     };
   } finally {
     if (closeCache) {
@@ -306,6 +336,15 @@ function normalizeDomain(input: string): string | undefined {
   return value;
 }
 
+function normalizeIp(input: string): string | undefined {
+  const value = input.trim();
+  return isIP(value) ? value : undefined;
+}
+
+function isString(value: string | undefined): value is string {
+  return typeof value === "string";
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("DNS lookup timed out")), timeoutMs);
@@ -330,6 +369,7 @@ export const testing = {
   correlateNetworkPaths,
   inferNetworkShape,
   normalizeDomain,
+  normalizeIp,
   parseBgpToolsWhois,
   summarizeNetworkIntel,
   traceroutePlan,

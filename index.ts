@@ -21,7 +21,9 @@ import {
   BotIdentityAssessSchema,
   InfraReputationSchema,
   PhoneReputationSchema,
+  VoipPathAssessSchema,
   assessBotIdentityForTool,
+  assessVoipPathForTool,
   queryInfraReputationForTool,
   queryPhoneReputationForTool,
 } from "./src/reputation.js";
@@ -131,6 +133,14 @@ export default defineToolPlugin({
         "Classify bot/service likelihood from explicit evidence without resolving private human identity.",
       parameters: BotIdentityAssessSchema,
       execute: assessBotIdentityForTool,
+    }),
+    tool({
+      name: "osint_voip_path_assess",
+      label: "OSINT VoIP Path Assessment",
+      description:
+        "Assess mismatch risk between a US phone number assignment, observed SIP/RTP IP paths, DNS/BGP network ownership, and STIR/SHAKEN attestation. Does not identify private owners.",
+      parameters: VoipPathAssessSchema,
+      execute: assessVoipPathForTool,
     }),
   ],
 });

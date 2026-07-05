@@ -131,6 +131,20 @@ Inputs can include:
 
 Outputs include owner-class hints, confidence, evidence, allowed actions, and blocked actions. Human identity resolution stays blocked even when spam/service evidence exists.
 
+### `osint_voip_path_assess`
+
+Assesses telecom-path mismatch risk from operator-supplied VoIP evidence.
+
+Inputs can include:
+
+- a US/NANP phone number
+- observed SIP signaling IPs from SIP headers, SBC logs, or PBX logs
+- observed RTP/media IPs from SDP, packet captures, or media logs
+- optional claimed company/service domain for DNS/BGP context
+- observed STIR/SHAKEN attestation (`A`, `B`, `C`, `none`, or `unknown`)
+
+The tool enriches observed SIP/RTP IPs with BGP network ownership and country data, then scores mismatch risk. For example, a US number with non-US SIP/RTP network paths and weak/absent STIR/SHAKEN attestation is a high-risk signal. It does not identify subscribers, human owners, or law-enforcement traceback results.
+
 ## Cache Behavior
 
 The plugin uses a bounded local SQLite cache for cacheable public sources.
@@ -152,7 +166,7 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.5.3.tgz
+openclaw plugins install ./openclaw-osint-0.6.0.tgz
 ```
 
 Restart the OpenClaw gateway after install.

@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import { Type, type Static } from "typebox";
 import { OsintCache } from "./cache.js";
-import { queryDomainNetworkIntelForTool } from "./domain-network.js";
+import {
+  queryDomainNetworkIntelForTool,
+  queryObservedIpsNetworkIntelForTool,
+} from "./domain-network.js";
 
 const FTC_SOURCE = "ftc-dnc";
 const SPAMHAUS_SOURCE = "spamhaus-drop";
@@ -119,9 +122,48 @@ export const BotIdentityAssessSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const VoipPathAssessSchema = Type.Object(
+  {
+    phone: Type.String({
+      description: "Phone number whose assignment geography should be compared with observed SIP/RTP paths.",
+    }),
+    claimedOrganizationDomain: Type.Optional(
+      Type.String({
+        description: "Optional claimed company/service domain for DNS/BGP context.",
+      }),
+    ),
+    observedSipIps: Type.Optional(
+      Type.Array(Type.String(), {
+        description: "Operator-observed SIP signaling IPs from SBC, PBX, or SIP headers.",
+        maxItems: 20,
+      }),
+    ),
+    observedRtpIps: Type.Optional(
+      Type.Array(Type.String(), {
+        description: "Operator-observed RTP/media IPs from SDP or packet/log evidence.",
+        maxItems: 20,
+      }),
+    ),
+    stirShakenAttestation: Type.Optional(
+      Type.Union([
+        Type.Literal("A"),
+        Type.Literal("B"),
+        Type.Literal("C"),
+        Type.Literal("none"),
+        Type.Literal("unknown"),
+      ], {
+        description: "Observed STIR/SHAKEN attestation, if present.",
+      }),
+    ),
+    refresh: Type.Optional(Type.Boolean({ description: "Refresh cached BGP data." })),
+  },
+  { additionalProperties: false },
+);
+
 type PhoneReputationParams = Static<typeof PhoneReputationSchema>;
 type InfraReputationParams = Static<typeof InfraReputationSchema>;
 type BotIdentityAssessParams = Static<typeof BotIdentityAssessSchema>;
+type VoipPathAssessParams = Static<typeof VoipPathAssessSchema>;
 
 type FtcComplaint = {
   id: string;
@@ -354,6 +396,62 @@ export function assessBotIdentityForTool(params: BotIdentityAssessParams) {
   };
 }
 
+export async function assessVoipPathForTool(params: VoipPathAssessParams & { cache?: OsintCache }) {
+  const phone = normalizeUsPhone(params.phone);
+  if (!phone) {
+    return {
+      ok: false,
+      error: "VoIP path assessment currently supports NANP/US-style numbers for assignment comparison.",
+    };
+  }
+  const observedSipIps = params.observedSipIps ?? [];
+  const observedRtpIps = params.observedRtpIps ?? [];
+  const observedIps = [...observedSipIps, ...observedRtpIps];
+  const observedNetwork = observedIps.length > 0
+    ? await queryObservedIpsNetworkIntelForTool({
+        ips: observedIps,
+        refresh: params.refresh,
+        cache: params.cache,
+      })
+    : undefined;
+  const claimedDomainNetwork = params.claimedOrganizationDomain
+    ? await maybeBuildNetworkCorrelation({
+        phone: params.phone,
+        organizationDomain: params.claimedOrganizationDomain,
+        refresh: params.refresh,
+        cache: params.cache,
+      })
+    : undefined;
+  const risk = scoreVoipPathRisk({
+    assignmentCountry: "US",
+    observedCountries: collectBgpCountryCodes(observedNetwork?.bgp),
+    stirShakenAttestation: params.stirShakenAttestation ?? "unknown",
+    hasObservedPath: observedIps.length > 0,
+  });
+  return {
+    ok: true,
+    phone: phone.e164,
+    assignment: {
+      country: "US",
+      basis: "local NANP normalization; detailed carrier/LRN data is not available without a carrier lookup source.",
+    },
+    observedPath: {
+      sipIps: observedSipIps,
+      rtpIps: observedRtpIps,
+      ...(observedNetwork ? { networkIntel: observedNetwork } : {}),
+    },
+    ...(claimedDomainNetwork ? { claimedDomainNetwork } : {}),
+    stirShaken: {
+      attestation: params.stirShakenAttestation ?? "unknown",
+      caveat: "STIR/SHAKEN attestation is a caller-ID provenance signal, not a fraud verdict.",
+    },
+    mismatchRisk: risk,
+    blockedClaims: ["subscriber_identity", "human_owner_identity", "law_enforcement_traceback_result"],
+    caveat:
+      "Foreign or cloud SIP/RTP paths can be legitimate for call centers; treat mismatch as a risk signal only when combined with weak provenance or complaint evidence.",
+  };
+}
+
 async function fetchFtcComplaints(
   phone: { national: string; areaCode: string },
   days: number,
@@ -525,6 +623,49 @@ function formatPhoneResult(
     caveat:
       "FTC reports and source leads are reputation evidence, not identity proof; phone numbers may be spoofed or reassigned.",
   };
+}
+
+function scoreVoipPathRisk(params: {
+  assignmentCountry: string;
+  observedCountries: readonly string[];
+  stirShakenAttestation: "A" | "B" | "C" | "none" | "unknown";
+  hasObservedPath: boolean;
+}) {
+  const foreignCountries = Array.from(new Set(
+    params.observedCountries.filter((country) => country && country !== params.assignmentCountry),
+  ));
+  const weakAttestation = ["B", "C", "none"].includes(params.stirShakenAttestation);
+  const reasons: string[] = [];
+  let score = 0.1;
+  if (!params.hasObservedPath) {
+    reasons.push("No SIP/RTP path evidence was supplied.");
+  }
+  if (foreignCountries.length > 0) {
+    score += 0.35;
+    reasons.push(`${params.assignmentCountry} number with observed non-${params.assignmentCountry} SIP/RTP network path: ${foreignCountries.join(", ")}`);
+  }
+  if (weakAttestation) {
+    score += 0.3;
+    reasons.push(`Weak or absent STIR/SHAKEN attestation: ${params.stirShakenAttestation}.`);
+  }
+  if (params.hasObservedPath && foreignCountries.length === 0) {
+    reasons.push("Observed SIP/RTP path does not show a country mismatch.");
+  }
+  if (!weakAttestation && params.stirShakenAttestation !== "unknown") {
+    reasons.push(`Strong STIR/SHAKEN attestation observed: ${params.stirShakenAttestation}.`);
+  }
+  const confidence = Math.min(0.95, score);
+  const level = confidence >= 0.7 ? "high" : confidence >= 0.4 ? "medium" : "low";
+  return {
+    level,
+    confidence: Number(confidence.toFixed(2)),
+    observedForeignCountries: foreignCountries,
+    reasons,
+  };
+}
+
+function collectBgpCountryCodes(bgp?: ReadonlyArray<{ countryCode?: string; error?: string }>): string[] {
+  return Array.from(new Set((bgp ?? []).flatMap((row) => row.countryCode ? [row.countryCode] : [])));
 }
 
 async function maybeBuildNetworkCorrelation(params: PhoneReputationParams & { cache?: OsintCache }) {
@@ -700,7 +841,9 @@ function formatError(error: unknown): string {
 
 export const testing = {
   assessBotIdentityForTool,
+  assessVoipPathForTool,
   buildPhoneOsintSourceLeads,
+  collectBgpCountryCodes,
   findContainingCidr,
   maybeBuildNetworkCorrelation,
   normalizeIpv4,
@@ -708,4 +851,5 @@ export const testing = {
   parseFtcComplaints,
   parseSpamhausDrop,
   queryPhoneReputationForTool,
+  scoreVoipPathRisk,
 };

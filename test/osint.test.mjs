@@ -409,4 +409,28 @@ describe("openclaw osint tools", () => {
     assert.equal(result.blockedActions.includes("human_identity_resolution"), true);
     assert.equal(result.allowedActions.includes("public_service_attribution"), true);
   });
+
+  it("scores VoIP path mismatch without identifying subscribers", () => {
+    const risk = reputationTesting.scoreVoipPathRisk({
+      assignmentCountry: "US",
+      observedCountries: ["IN", "US"],
+      stirShakenAttestation: "C",
+      hasObservedPath: true,
+    });
+
+    assert.equal(risk.level, "high");
+    assert.deepEqual(risk.observedForeignCountries, ["IN"]);
+    assert.equal(risk.reasons.some((reason) => reason.includes("Weak")), true);
+  });
+
+  it("accepts missing VoIP path evidence as low confidence", async () => {
+    const result = await reputationTesting.assessVoipPathForTool({
+      phone: "+1 (202) 555-0123",
+      stirShakenAttestation: "unknown",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.mismatchRisk.level, "low");
+    assert.equal(result.blockedClaims.includes("subscriber_identity"), true);
+  });
 });
