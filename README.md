@@ -4,6 +4,81 @@ MIT-licensed standalone OpenClaw plugin for bounded public-source OSINT helpers.
 
 This plugin is intentionally conservative. It provides useful public-source primitives without credentialed scraping, private data broker access, exploit checks, port scans, or shell execution.
 
+## Flow
+
+```mermaid
+flowchart TD
+  Request["User or agent request"] --> Plugin["OpenClaw OSINT plugin"]
+  Plugin --> Extract["osint_extract_indicators"]
+  Plugin --> Web["osint_url_snapshot"]
+  Plugin --> Certs["osint_crtsh_domain"]
+  Plugin --> Network["osint_domain_network_intel"]
+  Plugin --> Phone["osint_phone_reputation"]
+  Plugin --> Voip["osint_voip_path_assess"]
+  Plugin --> Infra["osint_infra_reputation"]
+  Plugin --> Bot["osint_bot_identity_assess"]
+  Plugin --> Hibp["HIBP tools"]
+  Plugin --> CacheStatus["osint_cache_status"]
+
+  Web --> Ssrfg["OpenClaw SSRF guard"]
+  Certs --> Crtsh["crt.sh"]
+  Network --> Dns["Local DNS"]
+  Network --> Bgp["bgp.tools WHOIS"]
+  Phone --> Ftc["FTC DNC if configured"]
+  Phone --> Leads["Telecom source leads"]
+  Voip --> Observed["Operator-supplied SIP/RTP IPs"]
+  Observed --> Bgp
+  Infra --> Spamhaus["Spamhaus DROP"]
+  Infra --> Abuse["AbuseIPDB if configured"]
+  Hibp --> HibpApi["Have I Been Pwned"]
+
+  Crtsh --> Cache["SQLite OSINT cache"]
+  Bgp --> Cache
+  Ftc --> Cache
+  Spamhaus --> Cache
+  HibpApi --> Cache
+  CacheStatus --> Cache
+
+  Leads --> Didww["DIDWW DID/prefix leads"]
+  Leads --> Ovh["OVH authenticated inventory lead"]
+  Leads --> Codes["Country-code references"]
+  Leads --> Blocked["Blocked person-search surfaces"]
+
+  Network --> Evidence["Bounded reputation/context evidence"]
+  Phone --> Evidence
+  Voip --> Evidence
+  Infra --> Evidence
+  Evidence --> Bot
+  Bot --> Guard["No private human identity resolution"]
+  Blocked --> Guard
+```
+
+```mermaid
+flowchart TD
+  Text["Raw text, logs, URLs, or transcript"] --> Extract["osint_extract_indicators"]
+  Extract --> Urls["URLs"]
+  Extract --> Domains["Domains"]
+  Extract --> Ips["IPv4 addresses"]
+  Extract --> Emails["Email addresses"]
+  Extract --> Handles["Handles"]
+  Extract --> Hashes["Hashes"]
+
+  Urls --> Snapshot["osint_url_snapshot"]
+  Domains --> Certs["osint_crtsh_domain"]
+  Domains --> Network["osint_domain_network_intel"]
+  Ips --> Infra["osint_infra_reputation"]
+  Emails --> HibpEmail["osint_hibp_email_breach"]
+  Hashes --> PwnedHash["osint_pwned_password_hash"]
+
+  Phone["Phone numbers: direct input"] --> PhoneRep["osint_phone_reputation"]
+  Sip["SIP/RTP IPs: operator evidence"] --> Voip["osint_voip_path_assess"]
+
+  Network --> Bot["osint_bot_identity_assess"]
+  Infra --> Bot
+  PhoneRep --> Bot
+  Voip --> Bot
+```
+
 ## Tools
 
 ### `osint_extract_indicators`
