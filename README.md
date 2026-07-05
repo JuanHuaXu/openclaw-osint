@@ -13,6 +13,7 @@ flowchart TD
   Plugin --> Web["osint_url_snapshot"]
   Plugin --> Certs["osint_crtsh_domain"]
   Plugin --> Network["osint_domain_network_intel"]
+  Plugin --> Authority["osint_domain_authority_intel"]
   Plugin --> Phone["osint_phone_reputation"]
   Plugin --> Voip["osint_voip_path_assess"]
   Plugin --> Infra["osint_infra_reputation"]
@@ -25,6 +26,8 @@ flowchart TD
   Certs --> Crtsh["crt.sh"]
   Network --> Dns["Local DNS"]
   Network --> Bgp["bgp.tools WHOIS"]
+  Authority --> AuthDns["Authority DNS records"]
+  Authority --> Rdap["IANA RDAP bootstrap + domain RDAP"]
   Phone --> Ftc["FTC DNC if configured"]
   Phone --> Leads["Telecom source leads"]
   Voip --> Observed["Operator-supplied SIP/RTP IPs"]
@@ -34,6 +37,7 @@ flowchart TD
   Hibp --> HibpApi["Have I Been Pwned"]
 
   Crtsh --> Cache["SQLite OSINT cache"]
+  Rdap --> Cache
   Bgp --> Cache
   Ftc --> Cache
   Spamhaus --> Cache
@@ -46,6 +50,9 @@ flowchart TD
   Leads --> Blocked["Blocked person-search surfaces"]
 
   Network --> Evidence["Bounded reputation/context evidence"]
+  Authority --> Evidence
+  Authority --> Phone
+  Authority --> Hibp
   Phone --> Evidence
   Voip --> Evidence
   Infra --> Evidence
@@ -73,9 +80,14 @@ flowchart TD
   Urls --> Snapshot["osint_url_snapshot"]
   Domains --> Certs["osint_crtsh_domain"]
   Domains --> Network["osint_domain_network_intel"]
+  Domains --> Authority["osint_domain_authority_intel"]
   Ips --> Infra["osint_infra_reputation"]
   Emails --> HibpEmail["osint_hibp_email_breach"]
   Hashes --> PwnedHash["osint_pwned_password_hash"]
+  Authority --> DerivedEmails["RDAP-derived emails"]
+  Authority --> DerivedPhones["RDAP-derived phones"]
+  DerivedEmails --> HibpEmail
+  DerivedPhones --> PhoneRep
 
   Phone["Phone numbers: direct input"] --> PhoneRep["osint_phone_reputation"]
   Sip["SIP/RTP IPs: operator evidence"] --> Voip["osint_voip_path_assess"]
@@ -90,7 +102,7 @@ Pipeline effort levels:
 
 - `light`: extract indicators only, no network lookups
 - `medium`: extract indicators, then enrich bounded URLs and domains
-- `high`: extract indicators, then run the broader bounded suite for URLs, domains, input or DNS-discovered IPs, emails, and password hashes
+- `high`: extract indicators, enrich URLs/domains, then correlate DNS-discovered IPs plus RDAP-derived emails/phones into reputation checks
 
 ## Tools
 
@@ -124,9 +136,9 @@ Runs bounded recon from raw text by effort level:
 
 - `light`: local indicator extraction only
 - `medium`: URL snapshots and domain network intel
-- `high`: medium plus crt.sh, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks, and pwned-password hash checks where indicators exist
+- `high`: medium plus authority DNS/RDAP, crt.sh, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for RDAP-derived phone contacts, and pwned-password hash checks where indicators exist
 
-The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline.
+The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline. RDAP-derived contact indicators are reputation inputs only, not identity proof.
 
 ### `osint_crtsh_domain`
 
@@ -154,6 +166,20 @@ Sources and behavior:
 - returns a correlated `summary` and `correlatedPaths` view joining DNS, BGP, and trace-plan data
 - can include an operator-side traceroute plan
 - does not run traceroute or shell commands itself
+
+### `osint_domain_authority_intel`
+
+Walks safe domain authority sources for a host or domain.
+
+Sources and behavior:
+
+- infers the registered domain for common host input such as `www.example.com`
+- uses the local DNS resolver for NS, SOA, MX, TXT, and CAA authority records
+- resolves the TLD RDAP service through the IANA RDAP bootstrap
+- fetches domain RDAP JSON through OpenClaw's SSRF guard
+- returns a compact RDAP summary plus bounded derived email and phone indicators
+- caches authority/RDAP output locally
+- treats RDAP contacts as role/reputation indicators, not private ownership attribution
 
 ### `osint_cache_status`
 
@@ -272,7 +298,7 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.7.1.tgz
+openclaw plugins install ./openclaw-osint-0.8.0.tgz
 ```
 
 Restart the OpenClaw gateway after install.

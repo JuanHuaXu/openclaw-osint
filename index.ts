@@ -10,6 +10,10 @@ import {
   queryDomainNetworkIntelForTool,
 } from "./src/domain-network.js";
 import {
+  DomainAuthorityIntelSchema,
+  queryDomainAuthorityIntelForTool,
+} from "./src/domain-authority.js";
+import {
   HibpEmailBreachSchema,
   HibpLatestBreachSchema,
   PwnedPasswordHashSchema,
@@ -76,6 +80,15 @@ export default defineToolPlugin({
         "Resolve a domain and enrich its IPs with bgp.tools WHOIS BGP ownership data. Includes an operator-side traceroute plan when requested, but does not run traceroute.",
       parameters: DomainNetworkIntelSchema,
       execute: queryDomainNetworkIntelForTool,
+    }),
+    tool({
+      name: "osint_domain_authority_intel",
+      label: "OSINT Domain Authority Intel",
+      description:
+        "Inspect a domain's authority DNS records and RDAP registration summary, then return bounded RDAP-derived contact indicators for reputation correlation.",
+      parameters: DomainAuthorityIntelSchema,
+      execute: (params, _config, context) =>
+        queryDomainAuthorityIntelForTool({ ...params, signal: context.signal }),
     }),
     tool({
       name: "osint_cache_status",

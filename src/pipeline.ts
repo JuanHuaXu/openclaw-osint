@@ -1,12 +1,13 @@
 import { Type, type Static } from "typebox";
 import { OsintCache } from "./cache.js";
 import { queryCrtshDomainForTool } from "./crtsh.js";
+import { queryDomainAuthorityIntelForTool } from "./domain-authority.js";
 import { queryDomainNetworkIntelForTool } from "./domain-network.js";
 import {
   queryHibpEmailBreachForTool,
   queryPwnedPasswordHashForTool,
 } from "./hibp.js";
-import { queryInfraReputationForTool } from "./reputation.js";
+import { queryInfraReputationForTool, queryPhoneReputationForTool } from "./reputation.js";
 import {
   extractIndicatorsForTool,
   snapshotUrlForTool,
@@ -83,13 +84,21 @@ export async function pipelineReconForTool(
       };
     }
 
+    const domainAuthorityFull = await Promise.all(
+      domains.map((domain) =>
+        queryDomainAuthorityIntelForTool({ domain, maxContacts: maxLookups, refresh: params.refresh, signal: params.signal, cache })
+      ),
+    );
+    const derivedIndicators = derivedIndicatorsFromAuthorityResults(domainAuthorityFull);
+    const domainAuthority = domainAuthorityFull.map(compactDomainAuthorityResult);
     const ips = uniqueBounded([
       ...indicators.ipv4,
       ...domainNetwork.flatMap(dnsIpsFromDomainNetworkResult),
     ], maxLookups);
-    const emails = indicators.emails.slice(0, maxLookups);
+    const emails = uniqueBounded([...indicators.emails, ...derivedIndicators.emails], maxLookups);
+    const phones = uniqueBounded(derivedIndicators.phones, maxLookups);
     const hashes = indicators.hashes.slice(0, maxLookups);
-    const [crtshDomains, infraReputation, hibpEmails, pwnedHashes] = await Promise.all([
+    const [crtshDomains, infraReputation, hibpEmails, phoneReputation, pwnedHashes] = await Promise.all([
       params.skipHighExpansion ? Promise.resolve([]) : Promise.all(
         domains.map((domain) =>
           queryCrtshDomainForTool({ domain, limit: 25, refresh: params.refresh, signal: params.signal, cache })
@@ -105,13 +114,24 @@ export async function pipelineReconForTool(
           queryHibpEmailBreachForTool({ email, refresh: params.refresh, signal: params.signal, cache })
         ),
       ),
+      Promise.all(
+        phones.map((phone) =>
+          queryPhoneReputationForTool({
+            phone,
+            organizationDomain: domains[0],
+            refresh: params.refresh,
+            signal: params.signal,
+            cache,
+          })
+        ),
+      ).then((results) => results.map(compactPhoneReputationResult)),
       params.skipHighExpansion ? Promise.resolve([]) : Promise.all(
         hashes.map((hash) =>
           queryPwnedPasswordHashForTool({ hash, algorithm: "auto", signal: params.signal })
         ),
       ),
     ]);
-    stages.push("crtsh_domain", "infra_reputation", "hibp_email_breach", "pwned_password_hash");
+    stages.push("domain_authority_intel", "crtsh_domain", "infra_reputation", "hibp_email_breach", "phone_reputation", "pwned_password_hash");
     return {
       ok: true,
       effort: params.effort,
@@ -121,9 +141,12 @@ export async function pipelineReconForTool(
       results: {
         urlSnapshots,
         domainNetwork,
+        domainAuthority,
+        derivedIndicators,
         crtshDomains,
         infraReputation,
         hibpEmails,
+        phoneReputation,
         pwnedHashes,
       },
       caveat:
@@ -149,4 +172,104 @@ function dnsIpsFromDomainNetworkResult(result: unknown): string[] {
       ? [record.address]
       : []
   );
+}
+
+function derivedIndicatorsFromAuthorityResults(results: readonly unknown[]) {
+  return {
+    emails: uniqueBounded(
+      results.flatMap((result) => indicatorValues(result, "emails")),
+      MAX_LOOKUPS,
+    ),
+    phones: uniqueBounded(
+      results.flatMap((result) => indicatorValues(result, "phones")),
+      MAX_LOOKUPS,
+    ),
+  };
+}
+
+function indicatorValues(result: unknown, key: "emails" | "phones"): string[] {
+  if (!result || typeof result !== "object" || !("derivedIndicators" in result)) {
+    return [];
+  }
+  const derived = result.derivedIndicators as Record<string, unknown>;
+  const values = derived[key];
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values.filter((value): value is string => typeof value === "string");
+}
+
+function compactDomainAuthorityResult(result: unknown): unknown {
+  if (!result || typeof result !== "object") {
+    return result;
+  }
+  const source = result as Record<string, unknown>;
+  if (source.ok !== true) {
+    return result;
+  }
+  return {
+    ok: true,
+    source: source.source,
+    inputDomain: source.inputDomain,
+    registeredDomain: source.registeredDomain,
+    cacheStatus: source.cacheStatus,
+    dnsAuthority: source.dnsAuthority,
+    rdap: compactRdapResult(source.rdap),
+    derivedIndicators: source.derivedIndicators,
+    sources: source.sources,
+    caveat: source.caveat,
+  };
+}
+
+function compactRdapResult(result: unknown): unknown {
+  if (!result || typeof result !== "object") {
+    return result;
+  }
+  const source = result as Record<string, unknown>;
+  return {
+    ok: source.ok,
+    rdapUrl: source.rdapUrl,
+    summary: source.summary,
+    error: source.error,
+  };
+}
+
+function compactPhoneReputationResult(result: unknown): unknown {
+  if (!result || typeof result !== "object") {
+    return result;
+  }
+  const source = result as Record<string, unknown>;
+  if (source.ok !== true) {
+    return result;
+  }
+  return {
+    ok: true,
+    source: source.source,
+    attribution: source.attribution,
+    phone: source.phone,
+    sourceStatuses: source.sourceStatuses,
+    complaintCount: source.complaintCount,
+    robocallCount: source.robocallCount,
+    numberingPlan: source.numberingPlan,
+    networkCorrelation: compactPhoneNetworkCorrelation(source.networkCorrelation),
+    confidence: source.confidence,
+    ownerClassHint: source.ownerClassHint,
+    caveat: source.caveat,
+  };
+}
+
+function compactPhoneNetworkCorrelation(result: unknown): unknown {
+  if (!result || typeof result !== "object") {
+    return result;
+  }
+  const source = result as Record<string, unknown>;
+  const networkIntel = source.networkIntel && typeof source.networkIntel === "object"
+    ? source.networkIntel as Record<string, unknown>
+    : undefined;
+  return {
+    organizationDomain: source.organizationDomain,
+    status: source.status,
+    basis: source.basis,
+    networkSummary: networkIntel?.summary,
+  };
 }

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { OsintCache } from "../dist/src/cache.js";
 import { testing as crtshTesting } from "../dist/src/crtsh.js";
+import { testing as domainAuthorityTesting } from "../dist/src/domain-authority.js";
 import { testing as domainNetworkTesting } from "../dist/src/domain-network.js";
 import { testing as hibpTesting } from "../dist/src/hibp.js";
 import { pipelineReconForTool } from "../dist/src/pipeline.js";
@@ -89,12 +90,40 @@ describe("openclaw osint tools", () => {
       });
 
       assert.equal(result.results.domainNetwork[0].ok, true);
+      assert.equal(result.results.domainAuthority.length, 1);
       assert.equal(result.results.infraReputation.length, 1);
       assert.equal(result.results.infraReputation[0].ip, result.results.domainNetwork[0].dns[0].address);
     } finally {
       cache.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("derives bounded reputation indicators from RDAP contacts", () => {
+    const indicators = domainAuthorityTesting.deriveIndicatorsFromRdap({
+      entities: [
+        {
+          vcardArray: [
+            "vcard",
+            [
+              ["email", {}, "text", "abuse@example.com"],
+              ["tel", {}, "uri", "tel:+1.202.555.0100"],
+            ],
+          ],
+        },
+      ],
+      remarks: [{ description: ["secondary noc@example.com +1 202 555 0101"] }],
+    }, 1);
+
+    assert.deepEqual(indicators.emails, ["abuse@example.com"]);
+    assert.deepEqual(indicators.phones, ["+1.202.555.0100"]);
+    assert.equal(domainAuthorityTesting.inferRegisteredDomain("www.example.com"), "example.com");
+    assert.deepEqual(domainAuthorityTesting.domainCandidates("deep.service.example.co.uk"), [
+      "deep.service.example.co.uk",
+      "service.example.co.uk",
+      "example.co.uk",
+      "co.uk",
+    ]);
   });
 
   it("extracts HTML metadata and visible text", () => {
