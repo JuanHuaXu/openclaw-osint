@@ -150,8 +150,8 @@ flowchart TD
 Pipeline effort levels:
 
 - `light`: extract indicators only, no network lookups
-- `medium`: extract indicators, then enrich bounded URLs and domains
-- `high`: extract indicators, enrich URLs/domains, then correlate TLS certificate chains, DNS-discovered IPs, RIR allocation records, Shodan host summaries, WHOIS/RDAP-derived business names, professional/workplace/disclosure leads, and RDAP-derived emails/phones into reputation checks. Host indicators are aggregated once from input domains, email domains, TLS SANs, Shodan hostnames, and related host sources.
+- `medium`: extract indicators, then enrich bounded URLs, domains, and Wikidata/Wikipedia public-knowledge context
+- `high`: extract indicators, enrich URLs/domains, then correlate TLS certificate chains, DNS-discovered IPs, RIR allocation records, Shodan host summaries, Wikidata/Wikipedia context, WHOIS/RDAP/BGP-derived business names, professional/workplace/disclosure leads, and RDAP-derived emails/phones into reputation checks. Host indicators are aggregated once from input domains, email domains, TLS SANs, Shodan hostnames, and related host sources.
 
 ## Tools
 
@@ -184,8 +184,8 @@ Fetches one public HTTP(S) URL through OpenClaw's SSRF guard and returns bounded
 Runs bounded recon from raw text by effort level:
 
 - `light`: local indicator extraction only
-- `medium`: URL snapshots and domain network intel
-- `high`: medium plus TLS certificate chain inspection, CDN/DDoS protection detection, authority DNS/RDAP, RIR IP assignment RDAP, Shodan host summaries for input or DNS-discovered IPs, business reputation/professional/workplace/disclosure leads for WHOIS/RDAP/BGP-derived organization names, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for RDAP-derived phone contacts, and pwned-password hash checks where indicators exist
+- `medium`: URL snapshots, domain network intel, and compact public-knowledge context
+- `high`: medium plus TLS certificate chain inspection, CDN/DDoS protection detection, authority DNS/RDAP, RIR IP assignment RDAP, Shodan host summaries for input or DNS-discovered IPs, business reputation/professional/workplace/disclosure leads for WHOIS/RDAP/BGP/Wikidata-derived organization names, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for RDAP-derived phone contacts, and pwned-password hash checks where indicators exist
 
 The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline. Shodan host checks use the full API when `SHODAN_API_KEY` exists and fall back to keyless InternetDB when it does not. RDAP-derived contact indicators and business-source hits are reputation inputs only, not identity proof or complete complaint history. `crt.sh` remains available through `osint_crtsh_domain`, but high-effort pipeline reports it as a deferred optional source because the public service is often slow or unavailable.
 
@@ -268,6 +268,7 @@ Sources and behavior:
 - resolves the responsible RIR through IANA IPv4/IPv6 RDAP bootstrap data
 - fetches RIR RDAP allocation records from ARIN, APNIC, RIPE NCC, LACNIC, AFRINIC, or the bootstrap-selected registry
 - returns compact IP assignment summaries and bounded RDAP-derived contact indicators
+- includes compact Wikidata/Wikipedia context for BGP/RDAP network owner names
 - returns a correlated `summary` and `correlatedPaths` view joining DNS, BGP, IP assignment, and trace-plan data
 - can include an operator-side traceroute plan
 - does not run traceroute or shell commands itself
@@ -310,6 +311,7 @@ Sources and behavior:
 - resolves the TLD RDAP service through the IANA RDAP bootstrap
 - fetches domain RDAP JSON through OpenClaw's SSRF guard
 - returns a compact RDAP summary plus bounded derived email and phone indicators
+- includes compact Wikidata/Wikipedia context for the registered-domain brand as a context lead
 - caches authority/RDAP output locally
 - treats RDAP contacts as role/reputation indicators, not private ownership attribution
 

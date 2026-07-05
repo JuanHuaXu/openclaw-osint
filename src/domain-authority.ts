@@ -3,6 +3,7 @@ import { promises as dns } from "node:dns";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import { Type, type Static } from "typebox";
 import { OsintCache, type OsintObservation } from "./cache.js";
+import { publicKnowledgeQueriesForDomain, queryPublicKnowledgeContextForTool } from "./public-knowledge.js";
 
 const DOMAIN_AUTHORITY_SOURCE = "domain-authority";
 const RDAP_BOOTSTRAP_SOURCE = "iana-rdap-dns-bootstrap";
@@ -78,6 +79,11 @@ export async function queryDomainAuthorityIntelForTool(
 
     const fetchedAt = Date.now();
     const dnsAuthority = await queryDnsAuthority(registeredDomain);
+    const publicKnowledgeContext = await queryPublicKnowledgeContextForTool({
+      queries: publicKnowledgeQueriesForDomain(registeredDomain),
+      maxRelated: 4,
+      signal: params.signal,
+    });
     const rdap = registration.rdap;
     const derivedIndicators = deriveIndicatorsFromRdap(rdap.rdap, maxContacts);
     const result = {
@@ -89,15 +95,17 @@ export async function queryDomainAuthorityIntelForTool(
       fetchedAt,
       expiresAt: fetchedAt + DOMAIN_AUTHORITY_TTL_MS,
       dnsAuthority,
+      publicKnowledgeContext,
       rdap,
       derivedIndicators,
       sources: [
         "local DNS resolver for NS/SOA/MX/TXT/CAA authority records",
+        "Wikidata/Wikipedia public-knowledge context",
         "IANA RDAP bootstrap",
         ...(rdap.rdapUrl ? [rdap.rdapUrl] : []),
       ],
       caveat:
-        "RDAP contact data is often redacted or role-based. Treat derived emails and phones as reputation indicators only, not private identity attribution.",
+        "RDAP contact data is often redacted or role-based. Wikidata/Wikipedia context is a lead, not ownership proof. Treat derived emails and phones as reputation indicators only, not private identity attribution.",
     };
     const rawJson = JSON.stringify(result);
     cache.putSource({

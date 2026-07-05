@@ -12,6 +12,7 @@ import { testing as domainNetworkTesting } from "../dist/src/domain-network.js";
 import { testing as hibpTesting } from "../dist/src/hibp.js";
 import { testing as ipAssignmentTesting } from "../dist/src/ip-assignment.js";
 import { pipelineReconForTool } from "../dist/src/pipeline.js";
+import { testing as publicKnowledgeTesting } from "../dist/src/public-knowledge.js";
 import { testing as reputationTesting } from "../dist/src/reputation.js";
 import { testing as shodanTesting } from "../dist/src/shodan.js";
 import { testing as tlsCertificateTesting } from "../dist/src/tls-certificate.js";
@@ -275,6 +276,33 @@ describe("openclaw osint tools", () => {
       url: "https://en.wikipedia.org/wiki/Example_Corp",
       caveat: "Wikipedia summary is context only; verify reputation, ownership, filings, and complaints with primary sources.",
     });
+  });
+
+  it("extracts bounded public-knowledge facts from Wikidata shapes", () => {
+    assert.deepEqual(publicKnowledgeTesting.publicKnowledgeQueriesForBusiness("Yahoo Holdings Inc."), [
+      "Yahoo Holdings Inc.",
+      "Yahoo",
+      "Yahoo Inc.",
+    ]);
+    assert.deepEqual(publicKnowledgeTesting.publicKnowledgeQueriesForDomain("service.example.co.uk"), ["example"]);
+    const facts = publicKnowledgeTesting.wikidataFactsFromEntity({
+      entities: {
+        Q1: {
+          aliases: { en: [{ value: "Example Brand" }] },
+          sitelinks: { enwiki: { title: "Example Corp" } },
+          claims: {
+            P856: [{ mainsnak: { datavalue: { value: "https://example.com" } } }],
+            P249: [{ mainsnak: { datavalue: { value: "EXM" } } }],
+            P355: [{ mainsnak: { datavalue: { value: { id: "Q2" } } } }],
+          },
+        },
+      },
+    });
+    assert.deepEqual(facts.aliases, ["Example Brand"]);
+    assert.deepEqual(facts.officialWebsites, ["https://example.com"]);
+    assert.deepEqual(facts.tickerSymbols, ["EXM"]);
+    assert.deepEqual(facts.relatedOrganizations, [{ id: "Q2", relation: "subsidiary" }]);
+    assert.equal(facts.wikipediaTitle, "Example Corp");
   });
 
   it("normalizes SEC company tickers and filing disclosure links", () => {

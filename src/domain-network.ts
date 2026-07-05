@@ -3,6 +3,7 @@ import { isIP, Socket } from "node:net";
 import { Type, type Static } from "typebox";
 import { OsintCache } from "./cache.js";
 import { queryIpAssignmentIntelForTool } from "./ip-assignment.js";
+import { publicKnowledgeQueriesForBusiness, queryPublicKnowledgeContextForTool } from "./public-knowledge.js";
 
 const BGPTOOLS_SOURCE = "bgp-tools-whois";
 const BGPTOOLS_TTL_MS = 6 * 60 * 60 * 1000;
@@ -69,12 +70,14 @@ export async function queryDomainNetworkIntelForTool(
       ipAssignments.push(await queryIpAssignmentIntelForTool({ ip, refresh: params.refresh, cache }));
     }
     const traceroute = params.includeTraceroutePlan ? traceroutePlan(domain, dnsRecords) : undefined;
+    const publicKnowledgeContext = await publicKnowledgeForNetworkOwners(bgp, ipAssignments);
     return {
       ok: true,
       domain,
       dns: dnsRecords,
       bgp,
       ipAssignments,
+      publicKnowledgeContext,
       summary: summarizeNetworkIntel(dnsRecords, bgp, Boolean(traceroute), ipAssignments),
       correlatedPaths: correlateNetworkPaths(dnsRecords, bgp, traceroute, ipAssignments),
       traceroute,
@@ -82,10 +85,11 @@ export async function queryDomainNetworkIntelForTool(
         "local DNS resolver",
         "bgp.tools WHOIS automation interface on TCP/43",
         "IANA IP RDAP bootstrap plus RIR RDAP allocation records",
+        "Wikidata/Wikipedia public-knowledge context for network owner names",
         ...(params.includeTraceroutePlan ? ["operator-side traceroute plan"] : []),
       ],
       caveat:
-        "DNS and BGP data are point-in-time routing observations. CDN/anycast domains may return different IPs from other networks.",
+        "DNS and BGP data are point-in-time routing observations. Wikidata/Wikipedia context is a lead, not routing or ownership proof. CDN/anycast domains may return different IPs from other networks.",
     };
   } finally {
     if (closeCache) {
@@ -110,21 +114,59 @@ export async function queryObservedIpsNetworkIntelForTool(
       bgp.push(await queryBgpToolsWithCache(ip, cache, Boolean(params.refresh)));
       ipAssignments.push(await queryIpAssignmentIntelForTool({ ip, refresh: params.refresh, cache }));
     }
+    const publicKnowledgeContext = await publicKnowledgeForNetworkOwners(bgp, ipAssignments);
     return {
       ok: true,
       ips: records.map((record) => record.address),
       bgp,
       ipAssignments,
+      publicKnowledgeContext,
       summary: summarizeNetworkIntel(records, bgp, false, ipAssignments),
       correlatedPaths: correlateNetworkPaths(records, bgp, undefined, ipAssignments),
       caveat:
-        "Observed SIP/RTP IPs are operator-supplied evidence. BGP data identifies routing/network ownership, not subscriber identity.",
+        "Observed SIP/RTP IPs are operator-supplied evidence. Wikidata/Wikipedia context is a lead, not routing or ownership proof. BGP data identifies routing/network ownership, not subscriber identity.",
     };
   } finally {
     if (closeCache) {
       cache.close();
     }
   }
+}
+
+async function publicKnowledgeForNetworkOwners(bgp: readonly unknown[], ipAssignments: readonly unknown[]) {
+  const queries = uniqueBounded([
+    ...businessValuesAt(bgp, ["asName"]),
+    ...businessValuesAt(ipAssignments, ["summary", "name"]),
+    ...businessValuesAt(ipAssignments, ["organization"]),
+    ...businessValuesAt(ipAssignments, ["org"]),
+  ].flatMap(publicKnowledgeQueriesForBusiness), 4);
+  return queryPublicKnowledgeContextForTool({ queries, maxRelated: 4 });
+}
+
+function businessValuesAt(value: unknown, path: readonly string[]): string[] {
+  if (path.length === 0) {
+    return typeof value === "string" ? [value] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => businessValuesAt(item, path));
+  }
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+  const [key, ...rest] = path;
+  return key ? businessValuesAt((value as Record<string, unknown>)[key], rest) : [];
+}
+
+function uniqueBounded(values: readonly string[], limit: number): string[] {
+  return Array.from(new Set(values.map(cleanBusinessCandidate).filter((value): value is string => Boolean(value)))).slice(0, limit);
+}
+
+function cleanBusinessCandidate(value: string): string | undefined {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (cleaned.length < 2 || cleaned.length > 120 || /^\d+$/.test(cleaned)) {
+    return undefined;
+  }
+  return cleaned;
 }
 
 async function resolveDomainIps(domain: string, maxIps: number) {

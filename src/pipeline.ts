@@ -9,6 +9,12 @@ import {
   queryPwnedPasswordHashForTool,
 } from "./hibp.js";
 import { queryIpAssignmentIntelForTool } from "./ip-assignment.js";
+import {
+  publicKnowledgeBusinessNames,
+  publicKnowledgeQueriesForDomain,
+  publicKnowledgeTickers,
+  queryPublicKnowledgeContextForTool,
+} from "./public-knowledge.js";
 import { queryInfraReputationForTool, queryPhoneReputationForTool } from "./reputation.js";
 import { queryShodanHostForTool } from "./shodan.js";
 import { queryTlsCertificateChainForTool } from "./tls-certificate.js";
@@ -74,6 +80,15 @@ export async function pipelineReconForTool(
       ),
     );
     const domainNetwork = domainNetworkFull.map(compactDomainNetworkResult);
+    const publicKnowledgeContext = await Promise.all(
+      domains.map((domain) =>
+        queryPublicKnowledgeContextForTool({
+          queries: publicKnowledgeQueriesForDomain(domain),
+          maxRelated: maxLookups,
+          signal: params.signal,
+        })
+      ),
+    );
     stages.push("url_snapshot", "domain_network_intel");
     if (params.effort === "medium") {
       return {
@@ -85,8 +100,9 @@ export async function pipelineReconForTool(
         results: {
           urlSnapshots,
           domainNetwork,
+          publicKnowledgeContext,
         },
-        caveat: "Medium recon enriches URLs and domains only; use high for broader indicator checks.",
+        caveat: "Medium recon enriches URLs, domains, and public-knowledge context only; use high for broader indicator checks.",
       };
     }
 
@@ -175,12 +191,15 @@ export async function pipelineReconForTool(
       domainAuthorityFull,
       ipAssignmentsFull,
       shodanHost,
+      publicKnowledgeContext,
     ).slice(0, maxLookups);
+    const publicKnowledgeTicker = uniqueBounded(publicKnowledgeContext.flatMap(publicKnowledgeTickers), 1)[0];
     const businessReputation = await Promise.all(
       businessNames.map((business) =>
         queryBusinessReputationForTool({
           business,
           domain: domains[0],
+          ...(publicKnowledgeTicker ? { ticker: publicKnowledgeTicker } : {}),
           maxResults: maxLookups,
           refresh: params.refresh,
           signal: params.signal,
@@ -202,6 +221,7 @@ export async function pipelineReconForTool(
         ipAssignments,
         tlsCertificates,
         cdnDdosProtection,
+        publicKnowledgeContext,
         businessReputation,
         derivedIndicators,
         infraReputation,
@@ -230,6 +250,7 @@ export async function pipelineReconForTool(
 function businessNamesFromWhoisEvidence(...sources: readonly unknown[]): string[] {
   return uniqueBounded(
     sources.flatMap((source) => [
+      ...publicKnowledgeBusinessNames(source),
       ...businessValuesAt(source, ["bgp", "asName"]),
       ...businessValuesAt(source, ["summary", "name"]),
       ...businessValuesAt(source, ["rdap", "summary", "name"]),
@@ -390,6 +411,7 @@ function compactDomainNetworkResult(result: unknown): unknown {
     domain: source.domain,
     dns: source.dns,
     bgp: source.bgp,
+    publicKnowledgeContext: source.publicKnowledgeContext,
     ipAssignments: Array.isArray(source.ipAssignments)
       ? source.ipAssignments.map(compactIpAssignmentResult)
       : source.ipAssignments,
