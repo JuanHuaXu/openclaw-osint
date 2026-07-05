@@ -1,8 +1,48 @@
 # OpenClaw OSINT
 
-MIT-licensed standalone OpenClaw plugin for bounded public-source OSINT helpers.
+MIT-licensed standalone OpenClaw plugin for bounded public-source OSINT helpers. Current package version: `0.21.7`.
 
 This plugin is intentionally conservative. It provides useful public-source primitives without credentialed scraping, private data broker access, exploit checks, port scans, or shell execution.
+
+Use it when an OpenClaw agent needs to extract indicators, snapshot public web pages, enrich domains and IPs, inspect public business context, or run a bounded recon pipeline. It is designed to produce evidence and leads, not private identity dossiers or vulnerability scans.
+
+## Quick Start
+
+```bash
+pnpm install
+pnpm build
+pnpm pack
+openclaw plugins install ./openclaw-osint-0.21.7.tgz
+```
+
+Restart the OpenClaw gateway after installing or upgrading the plugin.
+
+Useful smoke checks:
+
+```bash
+pnpm test
+openclaw plugins list
+```
+
+Ask the agent for one of the pipeline shapes:
+
+- `run a light osint pipeline on this text: ...`
+- `run a medium osint pipeline check on www.yahoo.com`
+- `run a high osint pipeline on this domain and summarize the key findings`
+
+## Configuration
+
+Most tools work without API keys. Keys unlock richer source coverage:
+
+- `SHODAN_API_KEY`: full Shodan host data; otherwise `osint_shodan_host` falls back to keyless InternetDB.
+- `HIBP_API_KEY`: Have I Been Pwned email breach checks.
+- `FTC_API_KEY`: FTC/Data.gov Do Not Call complaint evidence for explicit US phone indicators.
+- `ABUSEIPDB_API_KEY`: AbuseIPDB infrastructure reputation.
+- `COMPANIES_HOUSE_API_KEY` or `UK_COMPANIES_HOUSE_API_KEY`: UK Companies House API lookup.
+- `ABN_LOOKUP_GUID` or `AU_ABN_LOOKUP_GUID`: Australian ABN Lookup API.
+- `OPENCLAW_OSINT_DB_PATH`: override the SQLite cache path.
+
+No key is required for local indicator extraction, URL snapshots, passive software fingerprint hints, DNS/network enrichment, TLS certificate inspection, Wikidata/Wikipedia context, keyless Shodan InternetDB, or cache status.
 
 ## Flow
 
@@ -138,7 +178,7 @@ Returns:
 
 ### `osint_url_snapshot`
 
-Fetches one public HTTP(S) URL through OpenClaw's SSRF guard and returns bounded metadata:
+Fetches one public HTTP(S) URL through OpenClaw's SSRF guard and returns bounded metadata plus passive fingerprint hints:
 
 - HTTP status and final URL
 - content type
@@ -146,6 +186,17 @@ Fetches one public HTTP(S) URL through OpenClaw's SSRF guard and returns bounded
 - description
 - canonical URL
 - bounded body excerpt wrapped as untrusted external content
+- optional passive software/framework/OS hints from headers, cookies, page markers, and one randomized same-origin 404 probe
+- bounded 404 error-page excerpt when fingerprinting is enabled
+
+Arguments:
+
+- `url`: public HTTP(S) URL to fetch
+- `maxExcerptChars`: body excerpt cap
+- `includeFingerprint`: defaults to `true`; set `false` for metadata-only fetches
+- `maxErrorProbeChars`: cap for the 404 probe excerpt
+
+Fingerprint output is evidence, not proof. Treat OS detection as weak unless the server directly exposes it in a banner or error page.
 
 ### `osint_pipeline_recon`
 
@@ -157,7 +208,7 @@ Runs bounded recon from raw text by effort level:
 
 The tool accepts `text` as the canonical input and `target` as an alias for model/tool-search turns that phrase the input as a target URL, domain, actor, or indicator list.
 
-The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline. Shodan host checks use the full API when `SHODAN_API_KEY` exists and fall back to keyless InternetDB when it does not. RDAP-derived contact indicators and business-source hits are reputation inputs only, not identity proof or complete complaint history. `crt.sh` remains available through `osint_crtsh_domain`, but high-effort pipeline reports it as a deferred optional source because the public service is often slow or unavailable.
+The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. URL stages include the same passive fingerprint hints as `osint_url_snapshot`. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline. Shodan host checks use the full API when `SHODAN_API_KEY` exists and fall back to keyless InternetDB when it does not. RDAP-derived contact indicators and business-source hits are reputation inputs only, not identity proof or complete complaint history. `crt.sh` remains available through `osint_crtsh_domain`, but high-effort pipeline reports it as a deferred optional source because the public service is often slow or unavailable.
 
 High-effort pipeline output keeps expanded hostnames in one canonical place: `results.derivedIndicators.hosts`. Stage-level results avoid repeating those hostnames back into the agent context.
 
@@ -166,6 +217,14 @@ High-effort pipeline also returns `results.businessReputationSummary` before com
 High-effort pipeline self-compacts oversized result objects before returning them to OpenClaw. It preserves top-level findings and reports omitted per-stage counts instead of relying on downstream truncation. RDAP-derived phone contacts remain visible as derived indicators, but FTC phone reputation runs only for explicit phone-like input indicators.
 
 For agent-facing answers, prefer `keyFindings.execution.phoneReputationRan` over the stage list when deciding whether FTC lookup actually ran, and prefer `limits.outputTruncationMarkerPresent` over compaction fields when deciding whether downstream truncation occurred.
+
+Agent answer guidance:
+
+- Lead with `keyFindings` when present, then cite specific stage evidence.
+- Do not claim a source ran just because a related indicator exists; check the stage result or execution flags.
+- Treat `businessReputationSummary` as the compact business view when full stage output is truncated.
+- Treat `derivedIndicators` as correlation inputs, not facts about ownership or identity.
+- Say when an optional keyed source was unavailable or fell back to a keyless mode.
 
 ### `osint_cdn_ddos_detect`
 
@@ -435,16 +494,16 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 - per-source cache pruning: latest 250 source targets
 - no shell execution, scanning, credentialed APIs, or private-data-broker lookups
 
-## Install
+## Safety Boundaries
 
-```bash
-pnpm install
-pnpm build
-pnpm pack
-openclaw plugins install ./openclaw-osint-0.10.2.tgz
-```
+The plugin is built for bounded, evidence-carrying public-source enrichment:
 
-Restart the OpenClaw gateway after install.
+- no exploit checks, port scans, shell execution, or active vulnerability probing
+- no private data brokers, credentialed social scraping, or person-search automation
+- explicit phone checks are limited to US numbering-plan context, FTC DNC complaint evidence when configured, and public reputation leads
+- bot/service identity assessment is allowed when evidence points at a service, webhook, bot account, or infrastructure actor
+- human identity resolution remains blocked even when spam, abuse, or phone reputation evidence exists
+- tool output should be treated as leads and cited evidence, not as final attribution
 
 ## Build And Test
 
@@ -452,6 +511,12 @@ Restart the OpenClaw gateway after install.
 pnpm install
 pnpm build
 pnpm test
+```
+
+For plugin release packaging:
+
+```bash
+pnpm pack
 ```
 
 ## Versioning
