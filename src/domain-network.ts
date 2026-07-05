@@ -2,6 +2,7 @@ import { promises as dns } from "node:dns";
 import { isIP, Socket } from "node:net";
 import { Type, type Static } from "typebox";
 import { OsintCache } from "./cache.js";
+import { queryIpAssignmentIntelForTool } from "./ip-assignment.js";
 
 const BGPTOOLS_SOURCE = "bgp-tools-whois";
 const BGPTOOLS_TTL_MS = 6 * 60 * 60 * 1000;
@@ -62,8 +63,10 @@ export async function queryDomainNetworkIntelForTool(
   try {
     const dnsRecords = await resolveDomainIps(domain, maxIps);
     const bgp = [];
+    const ipAssignments = [];
     for (const ip of dnsRecords.map((record) => record.address)) {
       bgp.push(await queryBgpToolsWithCache(ip, cache, Boolean(params.refresh)));
+      ipAssignments.push(await queryIpAssignmentIntelForTool({ ip, refresh: params.refresh, cache }));
     }
     const traceroute = params.includeTraceroutePlan ? traceroutePlan(domain, dnsRecords) : undefined;
     return {
@@ -71,12 +74,14 @@ export async function queryDomainNetworkIntelForTool(
       domain,
       dns: dnsRecords,
       bgp,
-      summary: summarizeNetworkIntel(dnsRecords, bgp, Boolean(traceroute)),
-      correlatedPaths: correlateNetworkPaths(dnsRecords, bgp, traceroute),
+      ipAssignments,
+      summary: summarizeNetworkIntel(dnsRecords, bgp, Boolean(traceroute), ipAssignments),
+      correlatedPaths: correlateNetworkPaths(dnsRecords, bgp, traceroute, ipAssignments),
       traceroute,
       sources: [
         "local DNS resolver",
         "bgp.tools WHOIS automation interface on TCP/43",
+        "IANA IP RDAP bootstrap plus RIR RDAP allocation records",
         ...(params.includeTraceroutePlan ? ["operator-side traceroute plan"] : []),
       ],
       caveat:
@@ -100,15 +105,18 @@ export async function queryObservedIpsNetworkIntelForTool(
   const closeCache = !params.cache;
   try {
     const bgp = [];
+    const ipAssignments = [];
     for (const ip of records.map((record) => record.address)) {
       bgp.push(await queryBgpToolsWithCache(ip, cache, Boolean(params.refresh)));
+      ipAssignments.push(await queryIpAssignmentIntelForTool({ ip, refresh: params.refresh, cache }));
     }
     return {
       ok: true,
       ips: records.map((record) => record.address),
       bgp,
-      summary: summarizeNetworkIntel(records, bgp, false),
-      correlatedPaths: correlateNetworkPaths(records, bgp),
+      ipAssignments,
+      summary: summarizeNetworkIntel(records, bgp, false, ipAssignments),
+      correlatedPaths: correlateNetworkPaths(records, bgp, undefined, ipAssignments),
       caveat:
         "Observed SIP/RTP IPs are operator-supplied evidence. BGP data identifies routing/network ownership, not subscriber identity.",
     };
@@ -221,8 +229,10 @@ function summarizeNetworkIntel(
   records: ReadonlyArray<{ family: 4 | 6; address: string }>,
   bgp: ReadonlyArray<BgpToolsRow | { ip: string; error: string }>,
   hasTraceroutePlan: boolean,
+  ipAssignments: ReadonlyArray<unknown> = [],
 ) {
   const successful = bgp.filter(isBgpToolsRow);
+  const successfulAssignments = ipAssignments.filter(isSuccessfulIpAssignment);
   const asns = Array.from(new Map(successful.map((row) => [row.asn, row])).values());
   const families = Array.from(new Set(records.map((record) => record.family))).sort();
   return {
@@ -230,8 +240,11 @@ function summarizeNetworkIntel(
     dnsFamilies: families,
     bgpResolvedCount: successful.length,
     bgpErrorCount: bgp.length - successful.length,
+    ipAssignmentResolvedCount: successfulAssignments.length,
+    ipAssignmentErrorCount: ipAssignments.length - successfulAssignments.length,
     asnCount: asns.length,
     primaryAsns: asns.map((row) => `AS${row.asn} ${row.asName}`),
+    registries: Array.from(new Set(successfulAssignments.flatMap((row) => row.registryHint ?? []))),
     networkShape: inferNetworkShape(records, successful),
     tracerouteAvailable: hasTraceroutePlan ? "operator_plan_only" : "not_requested",
   };
@@ -241,9 +254,13 @@ function correlateNetworkPaths(
   records: ReadonlyArray<{ family: 4 | 6; address: string; ttl?: number }>,
   bgp: ReadonlyArray<BgpToolsRow | { ip: string; error: string }>,
   traceroute?: ReturnType<typeof traceroutePlan>,
+  ipAssignments: ReadonlyArray<unknown> = [],
 ) {
   return records.map((record) => {
     const bgpRow = bgp.find((row) => row.ip === record.address);
+    const assignment = ipAssignments.find((row) =>
+      row && typeof row === "object" && "ip" in row && row.ip === record.address
+    );
     const bgpValue = bgpRow
       ? isBgpToolsRow(bgpRow)
         ? {
@@ -263,6 +280,7 @@ function correlateNetworkPaths(
         ...(record.ttl !== undefined ? { ttl: record.ttl } : {}),
       },
       ...(bgpValue ? { bgp: bgpValue } : {}),
+      ...(assignment ? { ipAssignment: compactIpAssignment(assignment) } : {}),
       trace: {
         automated: false,
         status: "not_run",
@@ -308,6 +326,27 @@ function assessPathRole(bgp?: { asName?: string; error?: string }) {
 
 function isBgpToolsRow(row: BgpToolsRow | { ip: string; error: string }): row is BgpToolsRow {
   return "asn" in row;
+}
+
+function isSuccessfulIpAssignment(row: unknown): row is { ok: true; registryHint?: string } {
+  return Boolean(row && typeof row === "object" && "ok" in row && row.ok === true);
+}
+
+function compactIpAssignment(row: unknown): unknown {
+  if (!row || typeof row !== "object") {
+    return row;
+  }
+  const value = row as Record<string, unknown>;
+  if (value.ok !== true) {
+    return value;
+  }
+  return {
+    ok: true,
+    registryHint: value.registryHint,
+    rdapUrl: value.rdapUrl,
+    summary: value.summary,
+    derivedIndicators: value.derivedIndicators,
+  };
 }
 
 function traceroutePlan(

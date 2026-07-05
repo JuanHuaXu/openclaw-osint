@@ -32,6 +32,10 @@ import {
   queryPhoneReputationForTool,
 } from "./src/reputation.js";
 import {
+  IpAssignmentIntelSchema,
+  queryIpAssignmentIntelForTool,
+} from "./src/ip-assignment.js";
+import {
   PipelineReconSchema,
   pipelineReconForTool,
 } from "./src/pipeline.js";
@@ -142,6 +146,15 @@ export default defineToolPlugin({
       parameters: InfraReputationSchema,
       execute: (params, _config, context) =>
         queryInfraReputationForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_ip_assignment_intel",
+      label: "OSINT IP Assignment Intel",
+      description:
+        "Resolve IPv4 or IPv6 allocation data through IANA RDAP bootstrap and the responsible RIR RDAP service such as ARIN, APNIC, RIPE NCC, LACNIC, or AFRINIC.",
+      parameters: IpAssignmentIntelSchema,
+      execute: (params, _config, context) =>
+        queryIpAssignmentIntelForTool({ ...params, signal: context.signal }),
     }),
     tool({
       name: "osint_bot_identity_assess",

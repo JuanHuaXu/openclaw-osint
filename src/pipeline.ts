@@ -7,6 +7,7 @@ import {
   queryHibpEmailBreachForTool,
   queryPwnedPasswordHashForTool,
 } from "./hibp.js";
+import { queryIpAssignmentIntelForTool } from "./ip-assignment.js";
 import { queryInfraReputationForTool, queryPhoneReputationForTool } from "./reputation.js";
 import {
   extractIndicatorsForTool,
@@ -89,12 +90,21 @@ export async function pipelineReconForTool(
         queryDomainAuthorityIntelForTool({ domain, maxContacts: maxLookups, refresh: params.refresh, signal: params.signal, cache })
       ),
     );
-    const derivedIndicators = derivedIndicatorsFromAuthorityResults(domainAuthorityFull);
     const domainAuthority = domainAuthorityFull.map(compactDomainAuthorityResult);
     const ips = uniqueBounded([
       ...indicators.ipv4,
       ...domainNetwork.flatMap(dnsIpsFromDomainNetworkResult),
     ], maxLookups);
+    const ipAssignmentsFull = params.skipHighExpansion ? [] : await Promise.all(
+      ips.map((ip) =>
+        queryIpAssignmentIntelForTool({ ip, maxContacts: maxLookups, refresh: params.refresh, signal: params.signal, cache })
+      ),
+    );
+    const ipAssignments = ipAssignmentsFull.map(compactIpAssignmentResult);
+    const derivedIndicators = mergeDerivedIndicators(
+      derivedIndicatorsFromAuthorityResults(domainAuthorityFull),
+      derivedIndicatorsFromAuthorityResults(ipAssignmentsFull),
+    );
     const emails = uniqueBounded([...indicators.emails, ...derivedIndicators.emails], maxLookups);
     const phones = uniqueBounded(derivedIndicators.phones, maxLookups);
     const hashes = indicators.hashes.slice(0, maxLookups);
@@ -131,7 +141,7 @@ export async function pipelineReconForTool(
         ),
       ),
     ]);
-    stages.push("domain_authority_intel", "crtsh_domain", "infra_reputation", "hibp_email_breach", "phone_reputation", "pwned_password_hash");
+    stages.push("domain_authority_intel", "ip_assignment_intel", "crtsh_domain", "infra_reputation", "hibp_email_breach", "phone_reputation", "pwned_password_hash");
     return {
       ok: true,
       effort: params.effort,
@@ -142,6 +152,7 @@ export async function pipelineReconForTool(
         urlSnapshots,
         domainNetwork,
         domainAuthority,
+        ipAssignments,
         derivedIndicators,
         crtshDomains,
         infraReputation,
@@ -184,6 +195,13 @@ function derivedIndicatorsFromAuthorityResults(results: readonly unknown[]) {
       results.flatMap((result) => indicatorValues(result, "phones")),
       MAX_LOOKUPS,
     ),
+  };
+}
+
+function mergeDerivedIndicators(...items: Array<{ emails: readonly string[]; phones: readonly string[] }>) {
+  return {
+    emails: uniqueBounded(items.flatMap((item) => item.emails), MAX_LOOKUPS),
+    phones: uniqueBounded(items.flatMap((item) => item.phones), MAX_LOOKUPS),
   };
 }
 
@@ -271,5 +289,25 @@ function compactPhoneNetworkCorrelation(result: unknown): unknown {
     status: source.status,
     basis: source.basis,
     networkSummary: networkIntel?.summary,
+  };
+}
+
+function compactIpAssignmentResult(result: unknown): unknown {
+  if (!result || typeof result !== "object") {
+    return result;
+  }
+  const source = result as Record<string, unknown>;
+  if (source.ok !== true) {
+    return result;
+  }
+  return {
+    ok: true,
+    source: source.source,
+    ip: source.ip,
+    registryHint: source.registryHint,
+    rdapUrl: source.rdapUrl,
+    summary: source.summary,
+    derivedIndicators: source.derivedIndicators,
+    caveat: source.caveat,
   };
 }

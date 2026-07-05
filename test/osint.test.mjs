@@ -8,6 +8,7 @@ import { testing as crtshTesting } from "../dist/src/crtsh.js";
 import { testing as domainAuthorityTesting } from "../dist/src/domain-authority.js";
 import { testing as domainNetworkTesting } from "../dist/src/domain-network.js";
 import { testing as hibpTesting } from "../dist/src/hibp.js";
+import { testing as ipAssignmentTesting } from "../dist/src/ip-assignment.js";
 import { pipelineReconForTool } from "../dist/src/pipeline.js";
 import { testing as reputationTesting } from "../dist/src/reputation.js";
 import { testing } from "../dist/src/tools.js";
@@ -236,6 +237,29 @@ describe("openclaw osint tools", () => {
     );
   });
 
+  it("matches IPv4 and IPv6 addresses to RDAP bootstrap ranges", () => {
+    assert.equal(
+      ipAssignmentTesting.rangeContainsIp(
+        "69.0.0.0/8",
+        ipAssignmentTesting.ipv4ToBigInt("69.147.92.11"),
+        4,
+      ),
+      true,
+    );
+    assert.equal(
+      ipAssignmentTesting.rangeContainsIp(
+        "2001:400::/23",
+        ipAssignmentTesting.ipv6ToBigInt("2001:400::1"),
+        6,
+      ),
+      true,
+    );
+    assert.equal(ipAssignmentTesting.registryHintFromRdapUrl("https://rdap.arin.net/registry/ip/1.1.1.1"), "ARIN");
+    assert.equal(ipAssignmentTesting.registryHintFromRdapUrl("https://rdap.apnic.net/ip/1.1.1.1"), "APNIC");
+    assert.equal(ipAssignmentTesting.registryHintFromRdapUrl("https://rdap.db.ripe.net/ip/1.1.1.1"), "RIPE NCC");
+    assert.equal(ipAssignmentTesting.registryHintFromRdapUrl("https://rdap.registro.br/ip/200.160.2.3"), "LACNIC/NIC.br");
+  });
+
   it("keeps traceroute as an operator-side plan", () => {
     const plan = domainNetworkTesting.traceroutePlan("example.com", [
       { address: "203.0.113.42" },
@@ -261,17 +285,27 @@ describe("openclaw osint tools", () => {
     ];
     const trace = domainNetworkTesting.traceroutePlan("example.com", dns);
 
-    assert.deepEqual(domainNetworkTesting.summarizeNetworkIntel(dns, bgp, true), {
+    const assignment = {
+      ok: true,
+      ip: "104.20.23.154",
+      registryHint: "ARIN",
+      summary: { handle: "NET-104-20-0-0-1" },
+      derivedIndicators: { emails: ["abuse@example.net"], phones: [] },
+    };
+    assert.deepEqual(domainNetworkTesting.summarizeNetworkIntel(dns, bgp, true, [assignment]), {
       resolvedIpCount: 1,
       dnsFamilies: [4],
       bgpResolvedCount: 1,
       bgpErrorCount: 0,
+      ipAssignmentResolvedCount: 1,
+      ipAssignmentErrorCount: 0,
       asnCount: 1,
       primaryAsns: ["AS13335 Cloudflare, Inc."],
+      registries: ["ARIN"],
       networkShape: "cdn_or_anycast_likely",
       tracerouteAvailable: "operator_plan_only",
     });
-    assert.deepEqual(domainNetworkTesting.correlateNetworkPaths(dns, bgp, trace), [
+    assert.deepEqual(domainNetworkTesting.correlateNetworkPaths(dns, bgp, trace, [assignment]), [
       {
         ip: "104.20.23.154",
         dns: { family: 4, ttl: 300 },
@@ -282,6 +316,13 @@ describe("openclaw osint tools", () => {
           countryCode: "US",
           registry: "ARIN",
           allocated: "0001-01-01",
+        },
+        ipAssignment: {
+          ok: true,
+          registryHint: "ARIN",
+          rdapUrl: undefined,
+          summary: { handle: "NET-104-20-0-0-1" },
+          derivedIndicators: { emails: ["abuse@example.net"], phones: [] },
         },
         trace: {
           automated: false,

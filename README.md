@@ -17,6 +17,7 @@ flowchart TD
   Plugin --> Phone["osint_phone_reputation"]
   Plugin --> Voip["osint_voip_path_assess"]
   Plugin --> Infra["osint_infra_reputation"]
+  Plugin --> IpRdap["osint_ip_assignment_intel"]
   Plugin --> Bot["osint_bot_identity_assess"]
   Plugin --> Hibp["HIBP tools"]
   Plugin --> CacheStatus["osint_cache_status"]
@@ -26,6 +27,8 @@ flowchart TD
   Certs --> Crtsh["crt.sh"]
   Network --> Dns["Local DNS"]
   Network --> Bgp["bgp.tools WHOIS"]
+  Network --> IpRdap
+  IpRdap --> Rir["IANA IP RDAP bootstrap + RIR RDAP"]
   Authority --> AuthDns["Authority DNS records"]
   Authority --> Rdap["IANA RDAP bootstrap + domain RDAP"]
   Phone --> Ftc["FTC DNC if configured"]
@@ -38,6 +41,7 @@ flowchart TD
 
   Crtsh --> Cache["SQLite OSINT cache"]
   Rdap --> Cache
+  Rir --> Cache
   Bgp --> Cache
   Ftc --> Cache
   Spamhaus --> Cache
@@ -82,6 +86,7 @@ flowchart TD
   Domains --> Network["osint_domain_network_intel"]
   Domains --> Authority["osint_domain_authority_intel"]
   Ips --> Infra["osint_infra_reputation"]
+  Ips --> IpRdap["osint_ip_assignment_intel"]
   Emails --> HibpEmail["osint_hibp_email_breach"]
   Hashes --> PwnedHash["osint_pwned_password_hash"]
   Authority --> DerivedEmails["RDAP-derived emails"]
@@ -102,7 +107,7 @@ Pipeline effort levels:
 
 - `light`: extract indicators only, no network lookups
 - `medium`: extract indicators, then enrich bounded URLs and domains
-- `high`: extract indicators, enrich URLs/domains, then correlate DNS-discovered IPs plus RDAP-derived emails/phones into reputation checks
+- `high`: extract indicators, enrich URLs/domains, then correlate DNS-discovered IPs, RIR allocation records, and RDAP-derived emails/phones into reputation checks
 
 ## Tools
 
@@ -136,7 +141,7 @@ Runs bounded recon from raw text by effort level:
 
 - `light`: local indicator extraction only
 - `medium`: URL snapshots and domain network intel
-- `high`: medium plus authority DNS/RDAP, crt.sh, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for RDAP-derived phone contacts, and pwned-password hash checks where indicators exist
+- `high`: medium plus authority DNS/RDAP, crt.sh, RIR IP assignment RDAP, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for RDAP-derived phone contacts, and pwned-password hash checks where indicators exist
 
 The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline. RDAP-derived contact indicators are reputation inputs only, not identity proof.
 
@@ -155,7 +160,7 @@ The tool stores scoped observations in a local SQLite cache and drops names that
 
 ### `osint_domain_network_intel`
 
-Resolves a domain and enriches the returned IPs with passive network ownership data.
+Resolves a domain and enriches the returned IPs with passive routing and allocation ownership data.
 
 Sources and behavior:
 
@@ -163,9 +168,25 @@ Sources and behavior:
 - queries the supported bgp.tools WHOIS automation interface on TCP/43
 - caches bgp.tools WHOIS rows locally
 - returns ASN, BGP prefix, country, registry, allocation date, and AS name per IP
-- returns a correlated `summary` and `correlatedPaths` view joining DNS, BGP, and trace-plan data
+- resolves the responsible RIR through IANA IPv4/IPv6 RDAP bootstrap data
+- fetches RIR RDAP allocation records from ARIN, APNIC, RIPE NCC, LACNIC, AFRINIC, or the bootstrap-selected registry
+- returns compact IP assignment summaries and bounded RDAP-derived contact indicators
+- returns a correlated `summary` and `correlatedPaths` view joining DNS, BGP, IP assignment, and trace-plan data
 - can include an operator-side traceroute plan
 - does not run traceroute or shell commands itself
+
+### `osint_ip_assignment_intel`
+
+Looks up allocation data for an IPv4 or IPv6 address through the responsible Internet registry.
+
+Sources and behavior:
+
+- uses IANA IPv4/IPv6 RDAP bootstrap data to select the RIR endpoint
+- supports ARIN, APNIC, RIPE NCC, LACNIC, AFRINIC, and other bootstrap-listed RDAP services
+- returns compact allocation summary fields such as handle, name, country, start/end address, status, and events
+- returns bounded RDAP-derived emails and phone contacts as reputation indicators
+- caches bootstrap and allocation responses locally
+- does not identify subscribers, devices, or private human owners
 
 ### `osint_domain_authority_intel`
 
@@ -298,7 +319,7 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.8.0.tgz
+openclaw plugins install ./openclaw-osint-0.9.0.tgz
 ```
 
 Restart the OpenClaw gateway after install.
