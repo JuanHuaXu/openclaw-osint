@@ -59,6 +59,44 @@ describe("openclaw osint tools", () => {
     assert.equal("hibpEmails" in result.results, false);
   });
 
+  it("runs high pipeline infra reputation on domain-discovered IPs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "openclaw-osint-pipeline-"));
+    const cache = new OsintCache(join(dir, "osint.sqlite"));
+    try {
+      cache.putSource({
+        source: "bgp-tools-whois",
+        target: "93.184.216.34",
+        fetchedAt: Date.now(),
+        expiresAt: Date.now() + 60_000,
+        rawJson: JSON.stringify({
+          asn: "15133",
+          ip: "93.184.216.34",
+          prefix: "93.184.216.0/24",
+          countryCode: "US",
+          registry: "ARIN",
+          allocated: "0001-01-01",
+          asName: "EDGECAST",
+        }),
+        rawBytes: 2,
+        status: "ok",
+      });
+      const result = await pipelineReconForTool({
+        effort: "high",
+        maxLookups: 1,
+        text: "https://example.com",
+        cache,
+        skipHighExpansion: true,
+      });
+
+      assert.equal(result.results.domainNetwork[0].ok, true);
+      assert.equal(result.results.infraReputation.length, 1);
+      assert.equal(result.results.infraReputation[0].ip, result.results.domainNetwork[0].dns[0].address);
+    } finally {
+      cache.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("extracts HTML metadata and visible text", () => {
     const html = `
       <html><head>

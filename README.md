@@ -90,7 +90,7 @@ Pipeline effort levels:
 
 - `light`: extract indicators only, no network lookups
 - `medium`: extract indicators, then enrich bounded URLs and domains
-- `high`: extract indicators, then run the broader bounded suite for URLs, domains, IPs, emails, and password hashes
+- `high`: extract indicators, then run the broader bounded suite for URLs, domains, input or DNS-discovered IPs, emails, and password hashes
 
 ## Tools
 
@@ -124,7 +124,7 @@ Runs bounded recon from raw text by effort level:
 
 - `light`: local indicator extraction only
 - `medium`: URL snapshots and domain network intel
-- `high`: medium plus crt.sh, infrastructure reputation, HIBP email checks, and pwned-password hash checks where indicators exist
+- `high`: medium plus crt.sh, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks, and pwned-password hash checks where indicators exist
 
 The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline.
 
@@ -272,7 +272,7 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.7.0.tgz
+openclaw plugins install ./openclaw-osint-0.7.1.tgz
 ```
 
 Restart the OpenClaw gateway after install.

@@ -38,7 +38,7 @@ export const PipelineReconSchema = Type.Object(
 type PipelineReconParams = Static<typeof PipelineReconSchema>;
 
 export async function pipelineReconForTool(
-  params: PipelineReconParams & { signal?: AbortSignal; cache?: OsintCache },
+  params: PipelineReconParams & { signal?: AbortSignal; cache?: OsintCache; skipHighExpansion?: boolean },
 ) {
   const maxLookups = Math.min(Math.max(params.maxLookups ?? DEFAULT_MAX_LOOKUPS, 1), MAX_LOOKUPS);
   const indicators = extractIndicatorsForTool({ text: params.text });
@@ -83,11 +83,14 @@ export async function pipelineReconForTool(
       };
     }
 
-    const ips = indicators.ipv4.slice(0, maxLookups);
+    const ips = uniqueBounded([
+      ...indicators.ipv4,
+      ...domainNetwork.flatMap(dnsIpsFromDomainNetworkResult),
+    ], maxLookups);
     const emails = indicators.emails.slice(0, maxLookups);
     const hashes = indicators.hashes.slice(0, maxLookups);
     const [crtshDomains, infraReputation, hibpEmails, pwnedHashes] = await Promise.all([
-      Promise.all(
+      params.skipHighExpansion ? Promise.resolve([]) : Promise.all(
         domains.map((domain) =>
           queryCrtshDomainForTool({ domain, limit: 25, refresh: params.refresh, signal: params.signal, cache })
         ),
@@ -97,12 +100,12 @@ export async function pipelineReconForTool(
           queryInfraReputationForTool({ ip, refresh: params.refresh, signal: params.signal, cache })
         ),
       ),
-      Promise.all(
+      params.skipHighExpansion ? Promise.resolve([]) : Promise.all(
         emails.map((email) =>
           queryHibpEmailBreachForTool({ email, refresh: params.refresh, signal: params.signal, cache })
         ),
       ),
-      Promise.all(
+      params.skipHighExpansion ? Promise.resolve([]) : Promise.all(
         hashes.map((hash) =>
           queryPwnedPasswordHashForTool({ hash, algorithm: "auto", signal: params.signal })
         ),
@@ -131,4 +134,19 @@ export async function pipelineReconForTool(
       cache.close();
     }
   }
+}
+
+function uniqueBounded(values: readonly string[], limit: number): string[] {
+  return Array.from(new Set(values)).slice(0, limit);
+}
+
+function dnsIpsFromDomainNetworkResult(result: unknown): string[] {
+  if (!result || typeof result !== "object" || !("dns" in result) || !Array.isArray(result.dns)) {
+    return [];
+  }
+  return result.dns.flatMap((record) =>
+    record && typeof record === "object" && "address" in record && typeof record.address === "string"
+      ? [record.address]
+      : []
+  );
 }
