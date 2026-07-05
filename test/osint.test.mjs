@@ -42,6 +42,55 @@ describe("openclaw osint tools", () => {
     assert.equal(testing.normalizePublicHttpUrl("not a url"), undefined);
   });
 
+  it("extracts passive software and OS fingerprints from headers and 404 bodies", () => {
+    const fingerprints = testing.fingerprintFromHttpEvidence({
+      headers: {
+        server: "Apache/2.4.58 (Ubuntu)",
+        "x-powered-by": "PHP/8.2.12",
+      },
+      html: `
+        <html><head><title>404 Not Found</title></head>
+        <body><h1>Not Found</h1><address>Apache Server at example.com Port 443</address></body></html>
+      `,
+      source: "404_probe",
+    });
+
+    assert.equal(fingerprints.some((item) => item.name === "Apache httpd" && item.version === "2.4.58"), true);
+    assert.equal(fingerprints.some((item) => item.name === "PHP" && item.version === "8.2.12"), true);
+    assert.equal(fingerprints.some((item) => item.kind === "os" && item.name === "Ubuntu Linux"), true);
+  });
+
+  it("profiles Node, Express, Uvicorn, and FastAPI-style passive evidence", () => {
+    const fingerprints = testing.fingerprintFromHttpEvidence({
+      headers: {
+        server: "uvicorn",
+        "x-powered-by": "Express",
+        "set-cookie": "connect.sid=s%3Atest; Path=/; HttpOnly",
+      },
+      html: `
+        Cannot GET /__openclaw_osint_404_deadbeef
+        {"detail":"Not Found"}
+        at Layer.handle [as handle_request] (node:internal/modules/cjs/loader:123:45)
+      `,
+      source: "404_probe",
+    });
+
+    assert.equal(fingerprints.some((item) => item.kind === "software" && item.name === "Uvicorn"), true);
+    assert.equal(fingerprints.some((item) => item.kind === "framework" && item.name === "Express"), true);
+    assert.equal(fingerprints.some((item) => item.kind === "software" && item.name === "Node.js"), true);
+    assert.equal(fingerprints.some((item) => item.kind === "framework" && item.name === "FastAPI/Starlette"), true);
+    assert.equal(fingerprints.some((item) => item.kind === "framework" && item.name === "Express session middleware"), true);
+  });
+
+  it("builds randomized same-origin 404 probe URLs", () => {
+    const first = testing.build404ProbeUrl("https://example.com/app/page?q=1#top");
+    const second = testing.build404ProbeUrl("https://example.com/app/page?q=1#top");
+
+    assert.match(first, /^https:\/\/example\.com\/__openclaw_osint_404_[a-f0-9]{32}$/);
+    assert.match(second, /^https:\/\/example\.com\/__openclaw_osint_404_[a-f0-9]{32}$/);
+    assert.notEqual(first, second);
+  });
+
   it("runs light pipeline recon as extraction only", async () => {
     const result = await pipelineReconForTool({
       effort: "light",
