@@ -7,6 +7,7 @@ const BUSINESS_REPUTATION_SOURCE = "business-reputation";
 const FTC_RELEASE_NOTICES_SOURCE = "ftc-release-notices";
 const BBB_SEARCH_SOURCE = "bbb-business-search";
 const WIKIDATA_RELATED_BUSINESSES_SOURCE = "wikidata-related-businesses";
+const WIKIPEDIA_BUSINESS_CONTEXT_SOURCE = "wikipedia-business-context";
 const SEC_COMPANY_TICKERS_SOURCE = "sec-company-tickers";
 const SEC_SUBMISSIONS_SOURCE = "sec-submissions";
 const MARKET_FINANCIALS_SOURCE = "market-financials";
@@ -29,6 +30,7 @@ const DEFAULT_MAX_RESULTS = 5;
 const MAX_RESULTS = 10;
 const MAX_RELATED_BUSINESS_TARGETS = 5;
 const MAX_RELATED_BBB_SEARCHES = 4;
+const MAX_WIKIPEDIA_EXTRACT_CHARS = 700;
 const COMMON_SECOND_LEVEL_SUFFIXES = new Set(["ac", "co", "com", "edu", "gov", "net", "org"]);
 
 export const BusinessReputationLookupSchema = Type.Object(
@@ -100,7 +102,7 @@ export async function queryBusinessReputationForTool(
 
     const fetchedAt = Date.now();
     const relatedBusinessTargets = buildRelatedBusinessTargets(business, domain);
-    const [ftcReleaseNotices, bbbSearch, financialDisclosures, marketFinancials, regionalDisclosures, wikidataRelatedBusinesses] = await Promise.all([
+    const [ftcReleaseNotices, bbbSearch, financialDisclosures, marketFinancials, regionalDisclosures, wikidataRelatedBusinesses, wikipediaBusinessContext] = await Promise.all([
       queryFtcReleaseNotices(business, maxResults, params.signal),
       queryBbbBusinessSearch({ business, domain, maxResults, signal: params.signal }),
       querySecFinancialDisclosures({
@@ -127,6 +129,7 @@ export async function queryBusinessReputationForTool(
         signal: params.signal,
       }),
       queryWikidataRelatedBusinesses(relatedBusinessTargets, maxResults, params.signal),
+      queryWikipediaBusinessContext(relatedBusinessTargets, params.signal),
     ]);
     const relatedBbbTargets = relatedBusinessTargets
       .filter((target) => target.business !== business)
@@ -170,6 +173,7 @@ export async function queryBusinessReputationForTool(
       bbbSearch,
       relatedBusinessTargets,
       wikidataRelatedBusinesses,
+      wikipediaBusinessContext,
       relatedBbbSearches,
       professionalProfileLeads,
       workplaceReviewLeads,
@@ -181,6 +185,7 @@ export async function queryBusinessReputationForTool(
         sourceStatusFromResult(FTC_RELEASE_NOTICES_SOURCE, ftcReleaseNotices),
         sourceStatusFromResult(BBB_SEARCH_SOURCE, bbbSearch),
         sourceStatusFromResult(WIKIDATA_RELATED_BUSINESSES_SOURCE, wikidataRelatedBusinesses),
+        sourceStatusFromResult(WIKIPEDIA_BUSINESS_CONTEXT_SOURCE, wikipediaBusinessContext),
         sourceStatusFromResult(SEC_SUBMISSIONS_SOURCE, financialDisclosures),
         sourceStatusFromResult(MARKET_FINANCIALS_SOURCE, marketFinancials),
         sourceStatusFromResult(UK_COMPANIES_HOUSE_SOURCE, regionalDisclosures.ukCompaniesHouse),
@@ -348,6 +353,40 @@ async function queryWikidataRelatedBusinesses(
   }
 }
 
+async function queryWikipediaBusinessContext(
+  targets: Array<{ business: string; basis: string }>,
+  signal?: AbortSignal,
+) {
+  try {
+    for (const target of targets) {
+      const entity = await searchWikidataBusinessEntity(target.business, signal);
+      if (!entity) {
+        continue;
+      }
+      const entityData = await fetchWikidataEntity(entity.id, signal);
+      const title = wikipediaTitleFromWikidataEntity(entityData);
+      if (!title) {
+        continue;
+      }
+      const summary = await fetchWikipediaSummary(title, signal);
+      return {
+        ok: true,
+        source: WIKIPEDIA_BUSINESS_CONTEXT_SOURCE,
+        matched: entity,
+        ...summary,
+      };
+    }
+    return {
+      ok: false,
+      source: WIKIPEDIA_BUSINESS_CONTEXT_SOURCE,
+      status: "not_found",
+      error: "No matching Wikidata entity found for Wikipedia context.",
+    };
+  } catch (error) {
+    return { ok: false, source: WIKIPEDIA_BUSINESS_CONTEXT_SOURCE, error: formatError(error) };
+  }
+}
+
 async function searchWikidataBusinessEntity(business: string, signal?: AbortSignal) {
   const url = wikidataSearchUrl(business);
   const guarded = await fetchWithSsrFGuard({
@@ -396,6 +435,30 @@ async function fetchWikidataEntity(id: string, signal?: AbortSignal) {
       throw new Error(`Wikidata entity returned HTTP ${response.status}`);
     }
     return JSON.parse(await readResponseTextBounded(response, MAX_RESPONSE_BYTES));
+  } finally {
+    await release();
+  }
+}
+
+async function fetchWikipediaSummary(title: string, signal?: AbortSignal) {
+  const guarded = await fetchWithSsrFGuard({
+    url: wikipediaSummaryUrl(title),
+    init: {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; OpenClaw OSINT; +https://openclaw.ai)",
+      },
+    },
+    timeoutMs: LOOKUP_TIMEOUT_MS,
+    signal,
+    auditContext: "openclaw-osint-wikipedia-summary",
+  });
+  const { response, release, finalUrl } = guarded;
+  try {
+    if (!response.ok) {
+      throw new Error(`Wikipedia summary returned HTTP ${response.status}`);
+    }
+    return normalizeWikipediaSummary(JSON.parse(await readResponseTextBounded(response, MAX_RESPONSE_BYTES)), finalUrl);
   } finally {
     await release();
   }
@@ -909,6 +972,24 @@ function observationsFromBusinessLookup(target: string, result: Awaited<ReturnTy
       });
     }
   }
+  if (result.wikipediaBusinessContext.ok === true && result.wikipediaBusinessContext.title) {
+    observations.push({
+      id: stableObservationId(BUSINESS_REPUTATION_SOURCE, target, "wikipedia_context", result.wikipediaBusinessContext.url),
+      source: BUSINESS_REPUTATION_SOURCE,
+      target,
+      type: "wikipedia_context",
+      value: result.wikipediaBusinessContext.title,
+      confidence: 0.52,
+      admissionScore: 0.48,
+      storageTier: "thin",
+      observedAt,
+      sourceRef: result.wikipediaBusinessContext.url,
+      metadata: {
+        description: result.wikipediaBusinessContext.description,
+        matched: result.wikipediaBusinessContext.matched?.label,
+      },
+    });
+  }
   for (const filing of result.financialDisclosures.ok === true ? result.financialDisclosures.recentFilings : []) {
     observations.push({
       id: stableObservationId(BUSINESS_REPUTATION_SOURCE, target, "sec_filing", filing.accessionNumber),
@@ -1000,6 +1081,10 @@ function wikidataSearchUrl(business: string): string {
   url.searchParams.set("format", "json");
   url.searchParams.set("limit", "1");
   return url.toString();
+}
+
+function wikipediaSummaryUrl(title: string): string {
+  return `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}?redirect=true`;
 }
 
 function buildEuBusinessRegisterLeads(business: string, domain?: string) {
@@ -1726,6 +1811,48 @@ function normalizeWikidataLabels(parsed: unknown): Array<{ id: string; label: st
   });
 }
 
+function wikipediaTitleFromWikidataEntity(parsed: unknown): string | undefined {
+  const entity = firstWikidataEntity(parsed);
+  const title = entity
+      && typeof entity === "object"
+      && "sitelinks" in entity
+      && entity.sitelinks
+      && typeof entity.sitelinks === "object"
+      && "enwiki" in entity.sitelinks
+      && entity.sitelinks.enwiki
+      && typeof entity.sitelinks.enwiki === "object"
+      && "title" in entity.sitelinks.enwiki
+      && typeof entity.sitelinks.enwiki.title === "string"
+    ? entity.sitelinks.enwiki.title.trim()
+    : "";
+  return title || undefined;
+}
+
+function normalizeWikipediaSummary(parsed: unknown, finalUrl: string) {
+  const source = parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
+  const title = typeof source.title === "string" ? source.title.trim() : "";
+  const extract = typeof source.extract === "string"
+    ? source.extract.replace(/\s+/g, " ").trim().slice(0, MAX_WIKIPEDIA_EXTRACT_CHARS)
+    : "";
+  const description = typeof source.description === "string" ? source.description.trim() : undefined;
+  const pageUrl = source.content_urls
+      && typeof source.content_urls === "object"
+      && "desktop" in source.content_urls
+      && source.content_urls.desktop
+      && typeof source.content_urls.desktop === "object"
+      && "page" in source.content_urls.desktop
+      && typeof source.content_urls.desktop.page === "string"
+    ? source.content_urls.desktop.page
+    : finalUrl;
+  return {
+    title,
+    ...(description ? { description } : {}),
+    extract,
+    url: pageUrl,
+    caveat: "Wikipedia summary is context only; verify reputation, ownership, filings, and complaints with primary sources.",
+  };
+}
+
 function firstWikidataEntity(parsed: unknown): unknown {
   const entities = parsed && typeof parsed === "object" && "entities" in parsed && parsed.entities && typeof parsed.entities === "object"
     ? Object.values(parsed.entities)
@@ -1876,11 +2003,14 @@ export const testing = {
   normalizeTaiwanGcisRows,
   normalizeYahooChartSnapshot,
   normalizeWikidataLabels,
+  normalizeWikipediaSummary,
   parseJsonOrJsonp,
   parseBbbProfileLinks,
   taiwanFindbizUrl,
   taiwanGcisApiUrl,
   wikidataRelatedIdsFromEntity,
   wikidataSearchUrl,
+  wikipediaSummaryUrl,
+  wikipediaTitleFromWikidataEntity,
   yahooChartUrl,
 };

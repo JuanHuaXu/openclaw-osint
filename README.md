@@ -215,6 +215,7 @@ Sources and behavior:
 - queries the BBB public directory search page and extracts bounded BBB profile links when server-rendered links are present
 - also checks bounded related business targets from legal-name stripping and domain-brand context, so holding-company names do not collapse to a false “no BBB coverage” conclusion
 - uses bounded Wikidata parent/subsidiary/owner organization labels as related-company leads, then runs limited BBB searches for those names
+- fetches a compact English Wikipedia summary from the matched Wikidata entity as context only, never as reputation proof
 - returns LinkedIn company search and likely public company URL leads without credentialed scraping
 - returns Glassdoor company-review search leads without credentialed scraping
 - matches SEC EDGAR public-company records by ticker or normalized company name
@@ -233,6 +234,7 @@ Sources and behavior:
 - accepts optional related domain, ticker, and registry identifier fields as query context, not ownership proof
 - does not claim FTC Consumer Sentinel business complaint history, because that database is not publicly queryable by business
 - treats BBB coverage as directory/reputation context, not an authoritative business verdict
+- treats Wikipedia context as disambiguation and business-history context only
 - treats LinkedIn and Glassdoor output as search/profile leads only
 - treats SEC output as official disclosure evidence only for matched public filers; no SEC match is expected for many private companies
 - treats market snapshots as time-sensitive context; computed valuation fields are approximate and are not investment advice

@@ -249,6 +249,32 @@ describe("openclaw osint tools", () => {
         Q2: { labels: { en: { value: "Example Subsidiary" } } },
       },
     }), [{ id: "Q2", label: "Example Subsidiary" }]);
+    const wikidataEntity = {
+      entities: {
+        Q1: {
+          sitelinks: {
+            enwiki: { title: "Example Corp" },
+          },
+        },
+      },
+    };
+    assert.equal(businessTesting.wikipediaTitleFromWikidataEntity(wikidataEntity), "Example Corp");
+    assert.equal(
+      businessTesting.wikipediaSummaryUrl("Example Corp"),
+      "https://en.wikipedia.org/api/rest_v1/page/summary/Example%20Corp?redirect=true",
+    );
+    assert.deepEqual(businessTesting.normalizeWikipediaSummary({
+      title: "Example Corp",
+      description: "public company",
+      extract: "This is a long article summary. ".repeat(80),
+      content_urls: { desktop: { page: "https://en.wikipedia.org/wiki/Example_Corp" } },
+    }, "https://en.wikipedia.org/api/rest_v1/page/summary/Example_Corp"), {
+      title: "Example Corp",
+      description: "public company",
+      extract: `${"This is a long article summary. ".repeat(80).replace(/\s+/g, " ").trim().slice(0, 700)}`,
+      url: "https://en.wikipedia.org/wiki/Example_Corp",
+      caveat: "Wikipedia summary is context only; verify reputation, ownership, filings, and complaints with primary sources.",
+    });
   });
 
   it("normalizes SEC company tickers and filing disclosure links", () => {
