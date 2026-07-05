@@ -337,6 +337,27 @@ describe("openclaw osint tools", () => {
     );
   });
 
+  it("correlates phone checks with supplied organization domains without ownership claims", async () => {
+    const oldKey = process.env.FTC_API_KEY;
+    delete process.env.FTC_API_KEY;
+    try {
+      const result = await reputationTesting.queryPhoneReputationForTool({
+        phone: "+1 (202) 555-0123",
+        organizationDomain: "not a domain",
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.networkCorrelation.status, "error");
+      assert.match(result.networkCorrelation.basis, /not phone-number ownership/);
+    } finally {
+      if (oldKey === undefined) {
+        delete process.env.FTC_API_KEY;
+      } else {
+        process.env.FTC_API_KEY = oldKey;
+      }
+    }
+  });
+
   it("parses FTC complaint records without treating reports as verified identity", () => {
     const complaints = reputationTesting.parseFtcComplaints(JSON.stringify({
       data: [

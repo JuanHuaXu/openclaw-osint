@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import { Type, type Static } from "typebox";
 import { OsintCache } from "./cache.js";
+import { queryDomainNetworkIntelForTool } from "./domain-network.js";
 
 const FTC_SOURCE = "ftc-dnc";
 const SPAMHAUS_SOURCE = "spamhaus-drop";
@@ -69,6 +70,12 @@ export const PhoneReputationSchema = Type.Object(
     phone: Type.String({
       description: "Phone number to check against bounded public spam/robocall reputation data.",
     }),
+    organizationDomain: Type.Optional(
+      Type.String({
+        description:
+          "Optional company or service domain to correlate with DNS/BGP network ownership. The phone number is not treated as proof of domain ownership.",
+      }),
+    ),
     days: Type.Optional(
       Type.Integer({
         description: "Recent FTC complaint window to inspect. Defaults to 14 days.",
@@ -160,8 +167,10 @@ export async function queryPhoneReputationForTool(
   }
   const apiKey = process.env.FTC_API_KEY?.trim();
   const days = Math.min(Math.max(params.days ?? 14, 1), 30);
+  const networkCorrelation = await maybeBuildNetworkCorrelation(params);
   if (!apiKey) {
     return formatPhoneResult(phone, [], {
+      networkCorrelation,
       sourceStatuses: [
         {
           source: "local_normalization",
@@ -189,6 +198,7 @@ export async function queryPhoneReputationForTool(
         fetchedAt: fresh.fetchedAt,
         expiresAt: fresh.expiresAt,
         days,
+        networkCorrelation,
         sourceStatuses: [
           { source: "local_normalization", status: "checked" },
           { source: FTC_SOURCE, status: "checked", detail: "FTC DNC complaints served from local cache." },
@@ -213,6 +223,7 @@ export async function queryPhoneReputationForTool(
       fetchedAt,
       expiresAt: fetchedAt + FTC_TTL_MS,
       days,
+      networkCorrelation,
       sourceStatuses: [
         { source: "local_normalization", status: "checked" },
         { source: FTC_SOURCE, status: "checked", detail: "FTC DNC complaints refreshed from API." },
@@ -482,6 +493,7 @@ function formatPhoneResult(
     fetchedAt?: number;
     expiresAt?: number;
     days: number;
+    networkCorrelation?: Awaited<ReturnType<typeof maybeBuildNetworkCorrelation>>;
     sourceStatuses: readonly SourceStatus[];
   },
 ) {
@@ -499,6 +511,7 @@ function formatPhoneResult(
     sourceStatuses: meta.sourceStatuses,
     complaintCount: complaints.length,
     robocallCount,
+    ...(meta.networkCorrelation ? { networkCorrelation: meta.networkCorrelation } : {}),
     confidence: complaints.length === 0 ? 0.1 : Math.min(0.75, 0.35 + complaints.length * 0.03),
     ownerClassHint: complaints.length > 0 ? "service_or_spam_infra_possible" : "unknown_owner",
     sourceLeads: buildPhoneOsintSourceLeads(phone),
@@ -511,6 +524,26 @@ function formatPhoneResult(
     })),
     caveat:
       "FTC reports and source leads are reputation evidence, not identity proof; phone numbers may be spoofed or reassigned.",
+  };
+}
+
+async function maybeBuildNetworkCorrelation(params: PhoneReputationParams & { cache?: OsintCache }) {
+  const domain = params.organizationDomain?.trim();
+  if (!domain) {
+    return undefined;
+  }
+  const networkIntel = await queryDomainNetworkIntelForTool({
+    domain,
+    maxIps: 4,
+    includeTraceroutePlan: false,
+    refresh: params.refresh,
+    cache: params.cache,
+  });
+  return {
+    organizationDomain: domain,
+    status: networkIntel.ok ? "resolved" : "error",
+    basis: "User-supplied organizationDomain; this correlates phone reputation with domain DNS/BGP, not phone-number ownership.",
+    networkIntel,
   };
 }
 
@@ -669,6 +702,7 @@ export const testing = {
   assessBotIdentityForTool,
   buildPhoneOsintSourceLeads,
   findContainingCidr,
+  maybeBuildNetworkCorrelation,
   normalizeIpv4,
   normalizeUsPhone,
   parseFtcComplaints,
