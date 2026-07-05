@@ -8,6 +8,9 @@ const FTC_RELEASE_NOTICES_SOURCE = "ftc-release-notices";
 const BBB_SEARCH_SOURCE = "bbb-business-search";
 const SEC_COMPANY_TICKERS_SOURCE = "sec-company-tickers";
 const SEC_SUBMISSIONS_SOURCE = "sec-submissions";
+const MARKET_FINANCIALS_SOURCE = "market-financials";
+const YAHOO_CHART_SOURCE = "yahoo-finance-chart";
+const SEC_COMPANY_FACTS_SOURCE = "sec-company-facts";
 const UK_COMPANIES_HOUSE_SOURCE = "uk-companies-house";
 const EU_BRIS_SOURCE = "eu-bris-business-registers";
 const AU_ABN_LOOKUP_SOURCE = "au-abn-lookup";
@@ -17,8 +20,10 @@ const TW_GCIS_SOURCE = "tw-gcis";
 const TAIWAN_COMPANY_REGISTRATION_DATASET_ID = "5F64D864-61CB-4D0D-8AD9-492047CC1EA6";
 const BUSINESS_REPUTATION_TTL_MS = 12 * 60 * 60 * 1000;
 const SEC_COMPANY_TICKERS_TTL_MS = 24 * 60 * 60 * 1000;
+const MARKET_FINANCIALS_TTL_MS = 15 * 60 * 1000;
 const LOOKUP_TIMEOUT_MS = 12_000;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
+const SEC_COMPANY_FACTS_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 const DEFAULT_MAX_RESULTS = 5;
 const MAX_RESULTS = 10;
 
@@ -90,10 +95,18 @@ export async function queryBusinessReputationForTool(
     }
 
     const fetchedAt = Date.now();
-    const [ftcReleaseNotices, bbbSearch, financialDisclosures, regionalDisclosures] = await Promise.all([
+    const [ftcReleaseNotices, bbbSearch, financialDisclosures, marketFinancials, regionalDisclosures] = await Promise.all([
       queryFtcReleaseNotices(business, maxResults, params.signal),
       queryBbbBusinessSearch({ business, domain, maxResults, signal: params.signal }),
       querySecFinancialDisclosures({
+        business,
+        ticker,
+        maxResults,
+        signal: params.signal,
+        cache,
+        refresh: Boolean(params.refresh),
+      }),
+      queryMarketFinancials({
         business,
         ticker,
         maxResults,
@@ -127,12 +140,14 @@ export async function queryBusinessReputationForTool(
       professionalProfileLeads,
       workplaceReviewLeads,
       financialDisclosures,
+      marketFinancials,
       regionalDisclosures,
       searchLeads,
       sourceStatuses: [
         sourceStatusFromResult(FTC_RELEASE_NOTICES_SOURCE, ftcReleaseNotices),
         sourceStatusFromResult(BBB_SEARCH_SOURCE, bbbSearch),
         sourceStatusFromResult(SEC_SUBMISSIONS_SOURCE, financialDisclosures),
+        sourceStatusFromResult(MARKET_FINANCIALS_SOURCE, marketFinancials),
         sourceStatusFromResult(UK_COMPANIES_HOUSE_SOURCE, regionalDisclosures.ukCompaniesHouse),
         sourceStatusFromResult(EU_BRIS_SOURCE, regionalDisclosures.euBusinessRegisters),
         sourceStatusFromResult(AU_ABN_LOOKUP_SOURCE, regionalDisclosures.auAbnLookup),
@@ -141,7 +156,7 @@ export async function queryBusinessReputationForTool(
         sourceStatusFromResult(TW_GCIS_SOURCE, regionalDisclosures.asiaBusinessRegisters.taiwan),
       ],
       caveat:
-        "Business lookups are reputation, registry, and disclosure leads, not identity proof or a complete complaint history. FTC Consumer Sentinel business complaint data is not public; BBB, LinkedIn, and Glassdoor results depend on public page coverage and availability. SEC, Companies House, BRIS, ABN Lookup, and Asia registry coverage depends on jurisdiction, public API availability, and configured credentials.",
+        "Business lookups are reputation, registry, market-data, and disclosure leads, not identity proof, investment advice, or a complete complaint history. FTC Consumer Sentinel business complaint data is not public; BBB, LinkedIn, and Glassdoor results depend on public page coverage and availability. Market snapshots are time-sensitive and computed ratios are approximate. SEC, Companies House, BRIS, ABN Lookup, and Asia registry coverage depends on jurisdiction, public API availability, and configured credentials.",
     };
     const rawJson = JSON.stringify(result);
     cache.putSource({
@@ -328,6 +343,84 @@ async function querySecFinancialDisclosures(params: {
     }
   } catch (error) {
     return { ok: false, source: SEC_SUBMISSIONS_SOURCE, error: formatError(error) };
+  }
+}
+
+async function queryMarketFinancials(params: {
+  business: string;
+  ticker?: string;
+  maxResults: number;
+  signal?: AbortSignal;
+  cache: OsintCache;
+  refresh: boolean;
+}) {
+  try {
+    const company = await resolveSecCompany(params);
+    const ticker = params.ticker ?? company?.ticker;
+    if (!ticker) {
+      return {
+        ok: false,
+        source: MARKET_FINANCIALS_SOURCE,
+        status: "not_found",
+        error: "No public ticker match found for market-data lookup.",
+      };
+    }
+    const target = ticker.toUpperCase();
+    const fresh = params.refresh ? undefined : params.cache.getFreshSource(MARKET_FINANCIALS_SOURCE, target);
+    if (fresh) {
+      return {
+        ...JSON.parse(fresh.rawJson),
+        cacheStatus: "hit",
+        fetchedAt: fresh.fetchedAt,
+        expiresAt: fresh.expiresAt,
+      };
+    }
+    const [quoteSnapshot, secCompanyFacts] = await Promise.all([
+      queryYahooChartSnapshot(target, params.signal),
+      company
+        ? querySecCompanyFacts({
+          company,
+          maxResults: params.maxResults,
+          signal: params.signal,
+          cache: params.cache,
+          refresh: params.refresh,
+        })
+        : Promise.resolve({
+          ok: false,
+          source: SEC_COMPANY_FACTS_SOURCE,
+          status: "not_found",
+          error: "No SEC company match found for official company-facts enrichment.",
+        }),
+    ]);
+    const computed = computeMarketMetrics(quoteSnapshot, secCompanyFacts);
+    const fetchedAt = Date.now();
+    const result = {
+      ok: quoteSnapshot.ok === true || secCompanyFacts.ok === true,
+      source: MARKET_FINANCIALS_SOURCE,
+      ticker: target,
+      ...(company ? { matchedCompany: company } : {}),
+      cacheStatus: "refreshed",
+      fetchedAt,
+      expiresAt: fetchedAt + MARKET_FINANCIALS_TTL_MS,
+      quoteSnapshot,
+      secCompanyFacts,
+      computed,
+      caveat:
+        "Market data is time-sensitive. Quote data comes from Yahoo Finance chart metadata when available. Fundamentals come from SEC company facts when a public-filer match exists. P/E and market cap are computed only when the required inputs are present and should be treated as approximate context, not investment advice.",
+    };
+    const rawJson = JSON.stringify(result);
+    params.cache.putSource({
+      source: MARKET_FINANCIALS_SOURCE,
+      target,
+      fetchedAt,
+      expiresAt: fetchedAt + MARKET_FINANCIALS_TTL_MS,
+      rawJson,
+      rawBytes: Buffer.byteLength(rawJson),
+      status: result.ok ? "ok" : "error",
+    });
+    return result;
+  } catch (error) {
+    return { ok: false, source: MARKET_FINANCIALS_SOURCE, error: formatError(error) };
   }
 }
 
@@ -852,6 +945,106 @@ function abnLookupApiUrl(business: string, maxResults: number, guid?: string): s
   return url.toString();
 }
 
+async function queryYahooChartSnapshot(ticker: string, signal?: AbortSignal) {
+  const url = yahooChartUrl(ticker);
+  try {
+    const guarded = await fetchWithSsrFGuard({
+      url,
+      init: {
+        headers: {
+          Accept: "application/json,*/*;q=0.1",
+          "User-Agent": "Mozilla/5.0 (compatible; OpenClaw OSINT; +https://openclaw.ai)",
+        },
+      },
+      timeoutMs: LOOKUP_TIMEOUT_MS,
+      signal,
+      auditContext: "openclaw-osint-yahoo-chart",
+    });
+    const { response, release, finalUrl } = guarded;
+    try {
+      if (!response.ok) {
+        return { ok: false, source: YAHOO_CHART_SOURCE, url: finalUrl, error: `Yahoo chart returned HTTP ${response.status}` };
+      }
+      const parsed = JSON.parse(await readResponseTextBounded(response, MAX_RESPONSE_BYTES));
+      return normalizeYahooChartSnapshot(parsed, finalUrl);
+    } finally {
+      await release();
+    }
+  } catch (error) {
+    return { ok: false, source: YAHOO_CHART_SOURCE, url, error: formatError(error) };
+  }
+}
+
+async function querySecCompanyFacts(params: {
+  company: { cik: string; ticker: string; title: string };
+  maxResults: number;
+  signal?: AbortSignal;
+  cache: OsintCache;
+  refresh: boolean;
+}) {
+  const target = params.company.cik;
+  const fresh = params.refresh ? undefined : params.cache.getFreshSource(SEC_COMPANY_FACTS_SOURCE, target);
+  if (fresh) {
+    return {
+      ...JSON.parse(fresh.rawJson),
+      cacheStatus: "hit",
+      fetchedAt: fresh.fetchedAt,
+      expiresAt: fresh.expiresAt,
+    };
+  }
+  const url = `https://data.sec.gov/api/xbrl/companyfacts/CIK${params.company.cik}.json`;
+  try {
+    const guarded = await fetchWithSsrFGuard({
+      url,
+      init: {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "OpenClaw OSINT contact=openclaw.ai",
+        },
+      },
+      timeoutMs: LOOKUP_TIMEOUT_MS,
+      signal: params.signal,
+      auditContext: "openclaw-osint-sec-company-facts",
+    });
+    const { response, release, finalUrl } = guarded;
+    try {
+      if (!response.ok) {
+        return { ok: false, source: SEC_COMPANY_FACTS_SOURCE, url: finalUrl, error: `SEC company facts returned HTTP ${response.status}` };
+      }
+      const parsed = JSON.parse(await readResponseTextBounded(response, SEC_COMPANY_FACTS_MAX_RESPONSE_BYTES));
+      const normalized = normalizeSecCompanyFacts(parsed, params.company, params.maxResults, finalUrl);
+      const rawJson = JSON.stringify(normalized);
+      const fetchedAt = Date.now();
+      params.cache.putSource({
+        source: SEC_COMPANY_FACTS_SOURCE,
+        target,
+        fetchedAt,
+        expiresAt: fetchedAt + BUSINESS_REPUTATION_TTL_MS,
+        rawJson,
+        rawBytes: Buffer.byteLength(rawJson),
+        status: "ok",
+      });
+      return {
+        ...normalized,
+        cacheStatus: "refreshed",
+        fetchedAt,
+        expiresAt: fetchedAt + BUSINESS_REPUTATION_TTL_MS,
+      };
+    } finally {
+      await release();
+    }
+  } catch (error) {
+    return { ok: false, source: SEC_COMPANY_FACTS_SOURCE, url, error: formatError(error) };
+  }
+}
+
+function yahooChartUrl(ticker: string): string {
+  const url = new URL(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`);
+  url.searchParams.set("range", "1d");
+  url.searchParams.set("interval", "1d");
+  return url.toString();
+}
+
 function euBrisSearchUrl(business: string): string {
   return `https://e-justice.europa.eu/489/EN/business_registers__search_for_a_company_in_the_eu?searchText=${encodeURIComponent(business)}`;
 }
@@ -989,6 +1182,18 @@ function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function factValue(value: unknown): number | undefined {
+  return value && typeof value === "object" && "value" in value ? numberValue(value.value) : undefined;
+}
+
+function secondsToIso(value: number | undefined): string | undefined {
+  return value === undefined ? undefined : new Date(value * 1000).toISOString();
+}
+
+function roundMetric(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
 async function resolveSecCompany(params: {
   business: string;
   ticker?: string;
@@ -1101,6 +1306,123 @@ function normalizeSecSubmissions(parsed: unknown, company: { cik: string; ticker
     recentFilings,
     companyFactsUrl: `https://data.sec.gov/api/xbrl/companyfacts/CIK${company.cik}.json`,
     secCompanyPage: `https://www.sec.gov/edgar/browse/?CIK=${company.ticker}`,
+  };
+}
+
+function normalizeYahooChartSnapshot(parsed: unknown, url: string) {
+  const result = parsed && typeof parsed === "object" && "chart" in parsed &&
+      parsed.chart && typeof parsed.chart === "object" && "result" in parsed.chart &&
+      Array.isArray(parsed.chart.result)
+    ? parsed.chart.result[0]
+    : undefined;
+  const meta = result && typeof result === "object" && "meta" in result && result.meta && typeof result.meta === "object"
+    ? result.meta as Record<string, unknown>
+    : {};
+  const symbol = stringValue(meta.symbol);
+  if (!symbol) {
+    return { ok: false, source: YAHOO_CHART_SOURCE, url, error: "Yahoo chart response did not include symbol metadata." };
+  }
+  const price = numberValue(meta.regularMarketPrice);
+  const previousClose = numberValue(meta.chartPreviousClose);
+  return {
+    ok: true,
+    source: YAHOO_CHART_SOURCE,
+    url,
+    symbol,
+    name: stringValue(meta.longName) ?? stringValue(meta.shortName),
+    exchange: stringValue(meta.fullExchangeName) ?? stringValue(meta.exchangeName),
+    currency: stringValue(meta.currency),
+    regularMarketPrice: price,
+    previousClose,
+    regularMarketChange: price !== undefined && previousClose !== undefined ? roundMetric(price - previousClose) : undefined,
+    regularMarketChangePercent: price !== undefined && previousClose ? roundMetric(((price - previousClose) / previousClose) * 100) : undefined,
+    regularMarketTime: secondsToIso(numberValue(meta.regularMarketTime)),
+    dayHigh: numberValue(meta.regularMarketDayHigh),
+    dayLow: numberValue(meta.regularMarketDayLow),
+    fiftyTwoWeekHigh: numberValue(meta.fiftyTwoWeekHigh),
+    fiftyTwoWeekLow: numberValue(meta.fiftyTwoWeekLow),
+    regularMarketVolume: numberValue(meta.regularMarketVolume),
+  };
+}
+
+function normalizeSecCompanyFacts(parsed: unknown, company: { cik: string; ticker: string; title: string }, maxResults: number, url: string) {
+  const facts = parsed && typeof parsed === "object" && "facts" in parsed && parsed.facts && typeof parsed.facts === "object"
+    ? parsed.facts as Record<string, unknown>
+    : {};
+  const usGaap = facts["us-gaap"] && typeof facts["us-gaap"] === "object" ? facts["us-gaap"] as Record<string, unknown> : {};
+  const dei = facts.dei && typeof facts.dei === "object" ? facts.dei as Record<string, unknown> : {};
+  const concepts = { ...usGaap, ...dei };
+  const revenue = latestCompanyFact(concepts, ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"], ["USD"]);
+  const netIncome = latestCompanyFact(concepts, ["NetIncomeLoss"], ["USD"]);
+  const epsDiluted = latestCompanyFact(concepts, ["EarningsPerShareDiluted"], ["USD/shares"]);
+  const sharesOutstanding = latestCompanyFact(concepts, ["EntityCommonStockSharesOutstanding"], ["shares"]);
+  return {
+    ok: true,
+    source: SEC_COMPANY_FACTS_SOURCE,
+    url,
+    matchedCompany: company,
+    latestFacts: {
+      ...(revenue ? { revenue } : {}),
+      ...(netIncome ? { netIncome } : {}),
+      ...(epsDiluted ? { epsDiluted } : {}),
+      ...(sharesOutstanding ? { sharesOutstanding } : {}),
+    },
+    recentFacts: [revenue, netIncome, epsDiluted, sharesOutstanding].filter(Boolean).slice(0, maxResults),
+  };
+}
+
+function latestCompanyFact(concepts: Record<string, unknown>, tags: readonly string[], units: readonly string[]) {
+  const candidates = [];
+  for (const tag of tags) {
+    const concept = concepts[tag];
+    if (!concept || typeof concept !== "object" || !("units" in concept) || !concept.units || typeof concept.units !== "object") {
+      continue;
+    }
+    for (const unit of units) {
+      const rows = (concept.units as Record<string, unknown>)[unit];
+      if (!Array.isArray(rows)) {
+        continue;
+      }
+      candidates.push(...rows.flatMap((row) => {
+        if (!row || typeof row !== "object") {
+          return [];
+        }
+        const value = row as Record<string, unknown>;
+        const val = numberValue(value.val);
+        const end = stringValue(value.end);
+        const filed = stringValue(value.filed);
+        if (val === undefined || !end) {
+          return [];
+        }
+        return [{
+          tag,
+          unit,
+          value: val,
+          end,
+          filed,
+          form: stringValue(value.form),
+          fiscalYear: numberValue(value.fy),
+          fiscalPeriod: stringValue(value.fp),
+        }];
+      }));
+    }
+  }
+  return candidates.sort((a, b) => (b.filed ?? b.end).localeCompare(a.filed ?? a.end))[0];
+}
+
+function computeMarketMetrics(quoteSnapshot: unknown, secCompanyFacts: unknown) {
+  const quote = quoteSnapshot && typeof quoteSnapshot === "object" ? quoteSnapshot as Record<string, unknown> : {};
+  const facts = secCompanyFacts && typeof secCompanyFacts === "object" && "latestFacts" in secCompanyFacts &&
+      secCompanyFacts.latestFacts && typeof secCompanyFacts.latestFacts === "object"
+    ? secCompanyFacts.latestFacts as Record<string, unknown>
+    : {};
+  const price = numberValue(quote.regularMarketPrice);
+  const eps = factValue(facts.epsDiluted);
+  const shares = factValue(facts.sharesOutstanding);
+  return {
+    ...(price !== undefined && eps && eps > 0 ? { peRatioApprox: roundMetric(price / eps) } : {}),
+    ...(price !== undefined && shares && shares > 0 ? { marketCapApprox: Math.round(price * shares) } : {}),
+    basis: "P/E uses Yahoo chart regularMarketPrice divided by latest SEC diluted EPS fact. Market cap uses Yahoo chart regularMarketPrice multiplied by latest SEC shares outstanding fact.",
   };
 }
 
@@ -1232,16 +1554,21 @@ export const testing = {
   chinaGsxtSearchUrl,
   japanCorporateNumberSearchUrl,
   japanGbizInfoSearchUrl,
+  computeMarketMetrics,
+  latestCompanyFact,
   normalizeAbnLookupRows,
   normalizeBusinessName,
   normalizeCompaniesHouseSearchRows,
   normalizeFtcReleaseNoticeRows,
   normalizeRegistryId,
   normalizeSecCompanyTickerRows,
+  normalizeSecCompanyFacts,
   normalizeSecSubmissions,
   normalizeTaiwanGcisRows,
+  normalizeYahooChartSnapshot,
   parseJsonOrJsonp,
   parseBbbProfileLinks,
   taiwanFindbizUrl,
   taiwanGcisApiUrl,
+  yahooChartUrl,
 };

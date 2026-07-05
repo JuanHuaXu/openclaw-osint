@@ -247,6 +247,102 @@ describe("openclaw osint tools", () => {
     );
   });
 
+  it("normalizes market snapshots and SEC facts for computed financial metrics", () => {
+    const quote = businessTesting.normalizeYahooChartSnapshot({
+      chart: {
+        result: [{
+          meta: {
+            symbol: "EXM",
+            longName: "Example Holdings Inc.",
+            fullExchangeName: "NasdaqGS",
+            currency: "USD",
+            regularMarketPrice: 42,
+            chartPreviousClose: 40,
+            regularMarketTime: 1_700_000_000,
+            regularMarketDayHigh: 43,
+            regularMarketDayLow: 39,
+            fiftyTwoWeekHigh: 55,
+            fiftyTwoWeekLow: 25,
+            regularMarketVolume: 123456,
+          },
+        }],
+      },
+    }, "https://query1.finance.yahoo.com/v8/finance/chart/EXM");
+    assert.deepEqual(quote, {
+      ok: true,
+      source: "yahoo-finance-chart",
+      url: "https://query1.finance.yahoo.com/v8/finance/chart/EXM",
+      symbol: "EXM",
+      name: "Example Holdings Inc.",
+      exchange: "NasdaqGS",
+      currency: "USD",
+      regularMarketPrice: 42,
+      previousClose: 40,
+      regularMarketChange: 2,
+      regularMarketChangePercent: 5,
+      regularMarketTime: "2023-11-14T22:13:20.000Z",
+      dayHigh: 43,
+      dayLow: 39,
+      fiftyTwoWeekHigh: 55,
+      fiftyTwoWeekLow: 25,
+      regularMarketVolume: 123456,
+    });
+
+    const facts = businessTesting.normalizeSecCompanyFacts({
+      facts: {
+        "us-gaap": {
+          EarningsPerShareDiluted: {
+            units: {
+              "USD/shares": [
+                { val: 2, end: "2025-12-31", filed: "2026-02-01", form: "10-K", fy: 2025, fp: "FY" },
+              ],
+            },
+          },
+          EntityCommonStockSharesOutstanding: {
+            units: {
+              shares: [
+                { val: 1000, end: "2026-02-01", filed: "2026-02-02", form: "10-K", fy: 2025, fp: "FY" },
+              ],
+            },
+          },
+          Revenues: {
+            units: {
+              USD: [
+                { val: 8000, end: "2024-12-31", filed: "2025-02-01", form: "10-K", fy: 2024, fp: "FY" },
+              ],
+            },
+          },
+          RevenueFromContractWithCustomerExcludingAssessedTax: {
+            units: {
+              USD: [
+                { val: 9000, end: "2025-12-31", filed: "2026-02-01", form: "10-K", fy: 2025, fp: "FY" },
+              ],
+            },
+          },
+          NetIncomeLoss: {
+            units: {
+              USD: [
+                { val: 1200, end: "2025-12-31", filed: "2026-02-01", form: "10-K", fy: 2025, fp: "FY" },
+              ],
+            },
+          },
+        },
+      },
+    }, { cik: "0000001234", ticker: "EXM", title: "EXAMPLE HOLDINGS INC" }, 4, "https://data.sec.gov/api/xbrl/companyfacts/CIK0000001234.json");
+
+    assert.equal(facts.latestFacts.epsDiluted.value, 2);
+    assert.equal(facts.latestFacts.revenue.value, 9000);
+    assert.deepEqual(businessTesting.computeMarketMetrics(quote, facts), {
+      peRatioApprox: 21,
+      marketCapApprox: 42000,
+      basis: "P/E uses Yahoo chart regularMarketPrice divided by latest SEC diluted EPS fact. Market cap uses Yahoo chart regularMarketPrice multiplied by latest SEC shares outstanding fact.",
+    });
+    assert.equal(
+      businessTesting.yahooChartUrl("EXM"),
+      "https://query1.finance.yahoo.com/v8/finance/chart/EXM?range=1d&interval=1d",
+    );
+  });
+
   it("normalizes regional business register leads", () => {
     const ukRows = businessTesting.normalizeCompaniesHouseSearchRows({
       items: [{

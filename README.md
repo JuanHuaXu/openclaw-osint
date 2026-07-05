@@ -36,7 +36,9 @@ flowchart TD
   Business --> Glassdoor["Glassdoor company review leads"]
   Business --> FtcBiz["FTC release/API + official search leads"]
   Business --> Bbb["BBB public directory search"]
+  Business --> Market["Yahoo chart market snapshot"]
   Business --> Sec["SEC EDGAR disclosures"]
+  Business --> SecFacts["SEC company facts"]
   Business --> UkRegister["UK Companies House"]
   Business --> EuRegister["EU/EEA BRIS leads"]
   Business --> AuRegister["Australian ABN Lookup"]
@@ -67,7 +69,9 @@ flowchart TD
   Ftc --> Cache
   FtcBiz --> Cache
   Bbb --> Cache
+  Market --> Cache
   Sec --> Cache
+  SecFacts --> Cache
   UkRegister --> Cache
   AuRegister --> Cache
   AsiaRegister --> Cache
@@ -213,6 +217,9 @@ Sources and behavior:
 - returns Glassdoor company-review search leads without credentialed scraping
 - matches SEC EDGAR public-company records by ticker or normalized company name
 - returns recent SEC submission metadata and official SEC filing/company-facts URLs when a public-filer match exists
+- returns live-ish Yahoo Finance chart metadata for ticker price, volume, day range, 52-week range, and previous close when a ticker is known
+- returns SEC company-facts fundamentals such as latest revenue, net income, diluted EPS, and shares outstanding when a public-filer match exists
+- computes approximate P/E and market cap only when both quote and SEC fact inputs are available
 - queries UK Companies House when `COMPANIES_HOUSE_API_KEY` or `UK_COMPANIES_HOUSE_API_KEY` is configured; otherwise returns official UK register search leads
 - returns EU/EEA BRIS and national-register leads for European companies
 - queries Australian ABN Lookup when `ABN_LOOKUP_GUID` or `AU_ABN_LOOKUP_GUID` is configured; otherwise returns official ABN Lookup search leads
@@ -226,6 +233,7 @@ Sources and behavior:
 - treats BBB coverage as directory/reputation context, not an authoritative business verdict
 - treats LinkedIn and Glassdoor output as search/profile leads only
 - treats SEC output as official disclosure evidence only for matched public filers; no SEC match is expected for many private companies
+- treats market snapshots as time-sensitive context; computed valuation fields are approximate and are not investment advice
 - treats UK/EU/Australia/Asia register output as jurisdictional registration/disclosure context; availability depends on register coverage, public API availability, and configured credentials
 
 ### `osint_crtsh_domain`

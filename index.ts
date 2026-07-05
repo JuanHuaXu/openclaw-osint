@@ -99,7 +99,7 @@ export default defineToolPlugin({
       name: "osint_business_reputation_lookup",
       label: "OSINT Business Reputation Lookup",
       description:
-        "Check public FTC/BBB business reputation leads for a company or organization name discovered from WHOIS/RDAP/BGP evidence.",
+        "Check public business reputation, registry, market snapshot, SEC fundamentals, and disclosure leads for a company or organization name discovered from WHOIS/RDAP/BGP evidence.",
       parameters: BusinessReputationLookupSchema,
       execute: (params, _config, context) =>
         queryBusinessReputationForTool({ ...params, signal: context.signal }),
