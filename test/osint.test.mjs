@@ -293,6 +293,12 @@ describe("openclaw osint tools", () => {
 
       assert.equal(result.ok, true);
       assert.equal(result.phone, "+12025550123");
+      assert.deepEqual(result.numberingPlan.nanp, {
+        npa: "202",
+        nxx: "555",
+        npaNxx: "202555",
+        lineNumber: "0123",
+      });
       assert.equal(result.complaintCount, 0);
       assert.equal(
         result.sourceLeads.some(
@@ -303,6 +309,18 @@ describe("openclaw osint tools", () => {
       assert.equal(
         result.sourceLeads.some(
           (lead) => lead.source === "truecaller.com" && lead.automation === "blocked",
+        ),
+        true,
+      );
+      assert.equal(
+        result.sourceLeads.some(
+          (lead) => lead.source === "didww-api-nanpa-prefix" && lead.category === "did_inventory",
+        ),
+        true,
+      );
+      assert.equal(
+        result.sourceLeads.some(
+          (lead) => lead.source === "ovh-telephony-api" && lead.automation === "authenticated_api",
         ),
         true,
       );
@@ -329,6 +347,8 @@ describe("openclaw osint tools", () => {
 
     assert.equal(leads.some((lead) => lead.source === "scamcallfighters.com"), true);
     assert.equal(leads.some((lead) => lead.source === "receive-sms-online.com"), true);
+    assert.equal(leads.some((lead) => lead.source === "countrycode.org"), true);
+    assert.equal(leads.some((lead) => lead.source === "didww-area-prefix-directory"), true);
     assert.equal(
       leads
         .filter((lead) => lead.category === "person_search_blocked")
@@ -431,6 +451,7 @@ describe("openclaw osint tools", () => {
 
     assert.equal(result.ok, true);
     assert.equal(result.mismatchRisk.level, "low");
+    assert.equal(result.assignment.numberingPlan.nanp.npaNxx, "202555");
     assert.equal(result.blockedClaims.includes("subscriber_identity"), true);
   });
 });

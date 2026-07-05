@@ -19,6 +19,18 @@ const PHONE_FRAUD_REPORT_SOURCES = [
   "scamcallfighters.com",
   "signal-arnaques.com",
 ] as const;
+const DID_INVENTORY_SOURCES = [
+  "didww-api-nanpa-prefix",
+  "didww-area-prefix-directory",
+] as const;
+const AUTHENTICATED_TELEPHONY_SOURCES = [
+  "ovh-telephony-api",
+] as const;
+const NUMBERING_PLAN_REFERENCE_SOURCES = [
+  "countrycode.org",
+  "countryareacode.net",
+  "goles-country-codes-gist",
+] as const;
 const DISPOSABLE_PHONE_FOOTPRINT_SOURCES = [
   "receive-sms-online.com",
   "receive-sms-now.com",
@@ -190,10 +202,17 @@ type SourceStatus = {
 
 type PhoneSourceLead = {
   source: string;
-  category: "fraud_report" | "disposable_or_voip_footprint" | "person_search_blocked";
-  automation: "manual_search_lead" | "blocked";
+  category:
+    | "fraud_report"
+    | "disposable_or_voip_footprint"
+    | "did_inventory"
+    | "authenticated_telephony_inventory"
+    | "numbering_plan_reference"
+    | "person_search_blocked";
+  automation: "manual_search_lead" | "authenticated_api" | "reference_only" | "blocked";
   purpose: string;
   queryHints?: string[];
+  url?: string;
 };
 
 export async function queryPhoneReputationForTool(
@@ -433,6 +452,7 @@ export async function assessVoipPathForTool(params: VoipPathAssessParams & { cac
     phone: phone.e164,
     assignment: {
       country: "US",
+      numberingPlan: buildNumberingPlan(phone),
       basis: "local NANP normalization; detailed carrier/LRN data is not available without a carrier lookup source.",
     },
     observedPath: {
@@ -606,6 +626,7 @@ function formatPhoneResult(
     ...(meta.fetchedAt ? { fetchedAt: meta.fetchedAt } : {}),
     ...(meta.expiresAt ? { expiresAt: meta.expiresAt } : {}),
     windowDays: meta.days,
+    numberingPlan: buildNumberingPlan(phone),
     sourceStatuses: meta.sourceStatuses,
     complaintCount: complaints.length,
     robocallCount,
@@ -690,8 +711,37 @@ async function maybeBuildNetworkCorrelation(params: PhoneReputationParams & { ca
 
 function buildPhoneOsintSourceLeads(phone: { e164: string; national: string }): PhoneSourceLead[] {
   const local = `(${phone.national.slice(0, 3)}) ${phone.national.slice(3, 6)}-${phone.national.slice(6)}`;
+  const npaNxx = phone.national.slice(0, 6);
   const queryHints = [phone.e164, phone.national, local];
   return [
+    ...NUMBERING_PLAN_REFERENCE_SOURCES.map((source) => ({
+      source,
+      category: "numbering_plan_reference" as const,
+      automation: "reference_only" as const,
+      purpose: "Use only as country/area-code context; prefer authoritative numbering-plan data for hard conclusions.",
+      queryHints: [`+1`, phone.national.slice(0, 3), npaNxx],
+      ...(source === "countrycode.org" ? { url: "https://countrycode.org/" } : {}),
+      ...(source === "countryareacode.net" ? { url: "https://www.countryareacode.net/en/" } : {}),
+      ...(source === "goles-country-codes-gist" ? { url: "https://gist.github.com/Goles/3196253" } : {}),
+    })),
+    ...DID_INVENTORY_SOURCES.map((source) => ({
+      source,
+      category: "did_inventory" as const,
+      automation: "manual_search_lead" as const,
+      purpose: "Check whether the NANP prefix is sold or exposed in DID/VoIP inventory; this is infrastructure context, not subscriber identity.",
+      queryHints: [npaNxx, `${phone.national.slice(0, 3)}-${phone.national.slice(3, 6)}`],
+      ...(source === "didww-api-nanpa-prefix"
+        ? { url: "https://doc.didww.com/api3/2022-05-10/coverage-resources/nanpa/index.html" }
+        : { url: "https://directory.didww.com/area-prefixes" }),
+    })),
+    ...AUTHENTICATED_TELEPHONY_SOURCES.map((source) => ({
+      source,
+      category: "authenticated_telephony_inventory" as const,
+      automation: "authenticated_api" as const,
+      purpose: "Use only with operator-owned credentials to inspect owned telephony inventory or services.",
+      queryHints: [phone.e164, npaNxx],
+      url: "https://api.eu.ovhcloud.com/console/?branch=v1&section=%2Ftelephony",
+    })),
     ...PHONE_FRAUD_REPORT_SOURCES.map((source) => ({
       source,
       category: "fraud_report" as const,
@@ -713,6 +763,28 @@ function buildPhoneOsintSourceLeads(phone: { e164: string; national: string }): 
       purpose: "Person-search and address-broker lookup is intentionally not automated by this plugin.",
     })),
   ];
+}
+
+function buildNumberingPlan(phone: { e164: string; national: string }) {
+  return {
+    countryCallingCode: "+1",
+    region: "US/NANP",
+    countryHint: "US",
+    nationalSignificantNumber: phone.national,
+    nanp: {
+      npa: phone.national.slice(0, 3),
+      nxx: phone.national.slice(3, 6),
+      npaNxx: phone.national.slice(0, 6),
+      lineNumber: phone.national.slice(6),
+    },
+    sources: [
+      "local NANP normalization",
+      "country-code reference leads",
+      "DID inventory leads",
+    ],
+    caveat:
+      "Numbering-plan context identifies dial plan and prefix shape, not current subscriber or legal ownership.",
+  };
 }
 
 function parseFtcComplaints(rawJson: string): FtcComplaint[] {
@@ -842,6 +914,7 @@ function formatError(error: unknown): string {
 export const testing = {
   assessBotIdentityForTool,
   assessVoipPathForTool,
+  buildNumberingPlan,
   buildPhoneOsintSourceLeads,
   collectBgpCountryCodes,
   findContainingCidr,

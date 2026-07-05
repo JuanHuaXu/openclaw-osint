@@ -99,6 +99,7 @@ Requirements and behavior:
 - works without API keys for local US phone normalization
 - adds FTC complaint evidence when `FTC_API_KEY` is configured
 - returns categorized source leads for public fraud-report and disposable/VoIP footprint checks
+- returns numbering-plan context and source leads for DID inventory, country-code references, and authenticated operator inventory checks
 - marks person-search and address-broker sources as blocked automation
 - optionally accepts `organizationDomain` to correlate the number check with that domain's DNS/BGP network footprint
 - supports US numbers only
@@ -145,6 +146,13 @@ Inputs can include:
 
 The tool enriches observed SIP/RTP IPs with BGP network ownership and country data, then scores mismatch risk. For example, a US number with non-US SIP/RTP network paths and weak/absent STIR/SHAKEN attestation is a high-risk signal. It does not identify subscribers, human owners, or law-enforcement traceback results.
 
+Integrated telecom source leads:
+
+- DIDWW NANPA prefix/API documentation and area-prefix directory as DID/VoIP inventory leads
+- OVH telephony API as authenticated operator-owned inventory context only
+- CountryCode.org, CountryAreaCode, and the Goles country-code gist as low-authority numbering-plan references
+- NumInfo and other reverse-person lookup surfaces remain blocked automation
+
 ## Cache Behavior
 
 The plugin uses a bounded local SQLite cache for cacheable public sources.
@@ -166,7 +174,7 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.6.0.tgz
+openclaw plugins install ./openclaw-osint-0.6.1.tgz
 ```
 
 Restart the OpenClaw gateway after install.
