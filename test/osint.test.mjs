@@ -226,6 +226,31 @@ describe("openclaw osint tools", () => {
       { business: "Yahoo", basis: "legal_designator_stripped" },
       { business: "Yahoo Inc.", basis: "legal_variant" },
     ]);
+    assert.deepEqual(businessTesting.summarizeBbbCoverage(
+      "Yahoo Holdings Inc.",
+      { ok: true, profileLeads: [] },
+      [
+        {
+          business: "Yahoo",
+          basis: "legal_designator_stripped",
+          bbbSearch: { ok: true, profileLeads: [{ url: "https://www.bbb.org/us/example/yahoo" }] },
+        },
+      ],
+    ), {
+      exactBusiness: "Yahoo Holdings Inc.",
+      exactProfileCount: 0,
+      relatedProfileCount: 1,
+      hasExactProfile: false,
+      hasRelatedProfiles: true,
+      exactProfiles: [],
+      relatedProfiles: [{
+        business: "Yahoo",
+        basis: "legal_designator_stripped",
+        url: "https://www.bbb.org/us/example/yahoo",
+      }],
+      summary:
+        "BBB returned no exact profile lead for Yahoo Holdings Inc., but did return 1 related profile lead(s) for related business names.",
+    });
     assert.equal(businessTesting.domainBusinessName("service.example.co.uk"), "Example");
     assert.equal(
       new URL(businessTesting.wikidataSearchUrl("Yahoo Inc.")).searchParams.get("action"),

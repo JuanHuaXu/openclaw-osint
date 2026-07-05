@@ -214,6 +214,7 @@ Sources and behavior:
 - returns official FTC.gov and FTC legal-library search URLs for manual verification
 - queries the BBB public directory search page and extracts bounded BBB profile links when server-rendered links are present
 - also checks bounded related business targets from legal-name stripping and domain-brand context, so holding-company names do not collapse to a false “no BBB coverage” conclusion
+- returns a `bbbCoverage` summary that separates exact-profile misses from related-profile hits
 - uses bounded Wikidata parent/subsidiary/owner organization labels as related-company leads, then runs limited BBB searches for those names
 - fetches a compact English Wikipedia summary from the matched Wikidata entity as context only, never as reputation proof
 - returns LinkedIn company search and likely public company URL leads without credentialed scraping

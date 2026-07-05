@@ -159,6 +159,7 @@ export async function queryBusinessReputationForTool(
     const professionalProfileLeads = buildProfessionalProfileLeads(business, domain);
     const workplaceReviewLeads = buildWorkplaceReviewLeads(business, domain);
     const searchLeads = buildSearchLeads(business, domain);
+    const bbbCoverage = summarizeBbbCoverage(business, bbbSearch, relatedBbbSearches);
     const result = {
       ok: true,
       source: BUSINESS_REPUTATION_SOURCE,
@@ -171,6 +172,7 @@ export async function queryBusinessReputationForTool(
       expiresAt: fetchedAt + BUSINESS_REPUTATION_TTL_MS,
       ftcReleaseNotices,
       bbbSearch,
+      bbbCoverage,
       relatedBusinessTargets,
       wikidataRelatedBusinesses,
       wikipediaBusinessContext,
@@ -1757,6 +1759,49 @@ function parseBbbProfileLinks(html: string, limit: number) {
   ).slice(0, limit).map((url) => ({ url }));
 }
 
+function summarizeBbbCoverage(
+  business: string,
+  bbbSearch: unknown,
+  relatedBbbSearches: Array<{ business: string; basis: string; bbbSearch: unknown }>,
+) {
+  const exactProfiles = bbbProfileLinksFromResult(bbbSearch);
+  const relatedProfiles = relatedBbbSearches.flatMap((related) =>
+    bbbProfileLinksFromResult(related.bbbSearch).map((profile) => ({
+      business: related.business,
+      basis: related.basis,
+      url: profile.url,
+    }))
+  );
+  return {
+    exactBusiness: business,
+    exactProfileCount: exactProfiles.length,
+    relatedProfileCount: relatedProfiles.length,
+    hasExactProfile: exactProfiles.length > 0,
+    hasRelatedProfiles: relatedProfiles.length > 0,
+    exactProfiles,
+    relatedProfiles: relatedProfiles.slice(0, 8),
+    summary: exactProfiles.length > 0
+      ? `BBB returned ${exactProfiles.length} profile lead(s) for the exact business name.`
+      : relatedProfiles.length > 0
+      ? `BBB returned no exact profile lead for ${business}, but did return ${relatedProfiles.length} related profile lead(s) for related business names.`
+      : `BBB returned no exact or related profile leads for ${business}.`,
+  };
+}
+
+function bbbProfileLinksFromResult(value: unknown): Array<{ url: string }> {
+  return value && typeof value === "object"
+      && "ok" in value
+      && value.ok === true
+      && "profileLeads" in value
+      && Array.isArray(value.profileLeads)
+    ? value.profileLeads.flatMap((profile) =>
+      profile && typeof profile === "object" && "url" in profile && typeof profile.url === "string"
+        ? [{ url: profile.url }]
+        : []
+    )
+    : [];
+}
+
 function wikidataRelatedIdsFromEntity(parsed: unknown): Array<{ id: string; relation: string }> {
   const entity = firstWikidataEntity(parsed);
   const claims = entity && typeof entity === "object" && "claims" in entity && entity.claims && typeof entity.claims === "object"
@@ -2006,6 +2051,7 @@ export const testing = {
   normalizeWikipediaSummary,
   parseJsonOrJsonp,
   parseBbbProfileLinks,
+  summarizeBbbCoverage,
   taiwanFindbizUrl,
   taiwanGcisApiUrl,
   wikidataRelatedIdsFromEntity,
