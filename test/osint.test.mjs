@@ -146,8 +146,11 @@ describe("openclaw osint tools", () => {
       assert.equal(result.results.shodanHost.length, 1);
       assert.deepEqual(result.results.shodanHost[0].ports, [80, 443]);
       assert.equal(result.results.cdnDdosProtection.length, 1);
+      assert.equal(result.results.businessReputationSummary.length, 1);
+      assert.equal(Array.isArray(result.keyFindings.businessCoverage), true);
       assert.equal(result.results.businessReputation.length, 1);
       assert.equal(["Cloudflare, Inc.", "EDGECAST"].includes(result.results.businessReputation[0].business), true);
+      assert.equal("bbbSearch" in result.results.businessReputation[0], false);
       assert.equal(result.results.derivedIndicators.hosts.includes("example.com"), true);
       assert.equal(result.results.derivedIndicators.hosts.includes("mail.example.net"), true);
       assert.equal(result.results.derivedIndicators.hosts.includes("edge.example.net"), true);

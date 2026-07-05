@@ -207,6 +207,8 @@ export async function pipelineReconForTool(
         })
       ),
     );
+    const businessReputationSummary = summarizeBusinessReputationResults(businessReputation);
+    const compactBusinessReputation = businessReputation.map(compactBusinessReputationResult);
     stages.push("domain_authority_intel", "ip_assignment_intel", "tls_certificate_chain", "cdn_ddos_detect", "business_reputation_lookup", "infra_reputation", "shodan_host", "hibp_email_breach", "phone_reputation", "pwned_password_hash");
     return {
       ok: true,
@@ -214,6 +216,7 @@ export async function pipelineReconForTool(
       stages,
       indicators,
       limits: { maxLookups },
+      keyFindings: buildPipelineKeyFindings({ businessReputationSummary }),
       results: {
         urlSnapshots,
         domainNetwork,
@@ -222,7 +225,8 @@ export async function pipelineReconForTool(
         tlsCertificates,
         cdnDdosProtection,
         publicKnowledgeContext,
-        businessReputation,
+        businessReputationSummary,
+        businessReputation: compactBusinessReputation,
         derivedIndicators,
         infraReputation,
         shodanHost,
@@ -282,6 +286,9 @@ function cleanBusinessCandidate(value: string): string | undefined {
     return undefined;
   }
   if (/^(n\/a|none|unknown|private|redacted)$/i.test(cleaned)) {
+    return undefined;
+  }
+  if (/^[A-Z0-9-]+$/.test(cleaned) && (/\d/.test(cleaned) || cleaned.split("-").length > 2)) {
     return undefined;
   }
   return cleaned;
@@ -454,6 +461,150 @@ function compactDomainAuthorityResult(result: unknown): unknown {
     rdap: compactRdapResult(source.rdap),
     sources: source.sources,
     caveat: source.caveat,
+  };
+}
+
+function summarizeBusinessReputationResults(results: readonly unknown[]): unknown[] {
+  return results.map((result) => {
+    if (!result || typeof result !== "object") {
+      return result;
+    }
+    const source = result as Record<string, unknown>;
+    if (source.ok !== true) {
+      return {
+        ok: source.ok,
+        business: source.business,
+        error: source.error,
+      };
+    }
+    const bbbCoverage = source.bbbCoverage && typeof source.bbbCoverage === "object"
+      ? source.bbbCoverage as Record<string, unknown>
+      : {};
+    return {
+      business: source.business,
+      domain: source.domain,
+      bbbSummary: bbbCoverage.summary,
+      exactBbbProfiles: bbbCoverage.exactProfileCount,
+      relatedBbbProfiles: bbbCoverage.relatedProfileCount,
+      hasRelatedBbbProfiles: bbbCoverage.hasRelatedProfiles,
+      wikipediaTitle: source.wikipediaBusinessContext
+          && typeof source.wikipediaBusinessContext === "object"
+          && "title" in source.wikipediaBusinessContext
+        ? source.wikipediaBusinessContext.title
+        : undefined,
+      marketSymbol: source.marketFinancials
+          && typeof source.marketFinancials === "object"
+          && "ticker" in source.marketFinancials
+        ? source.marketFinancials.ticker
+        : undefined,
+    };
+  });
+}
+
+function buildPipelineKeyFindings(params: { businessReputationSummary: readonly unknown[] }) {
+  const businessCoverage = params.businessReputationSummary.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return [];
+    }
+    const source = entry as Record<string, unknown>;
+    const bbbSummary = typeof source.bbbSummary === "string" ? source.bbbSummary : undefined;
+    if (!bbbSummary) {
+      return [];
+    }
+    return [{
+      type: "business_bbb_coverage",
+      business: source.business,
+      summary: bbbSummary,
+      exactBbbProfiles: source.exactBbbProfiles,
+      relatedBbbProfiles: source.relatedBbbProfiles,
+      hasRelatedBbbProfiles: source.hasRelatedBbbProfiles,
+      wikipediaTitle: source.wikipediaTitle,
+    }];
+  });
+  return {
+    businessCoverage,
+  };
+}
+
+function compactBusinessReputationResult(result: unknown): unknown {
+  if (!result || typeof result !== "object") {
+    return result;
+  }
+  const source = result as Record<string, unknown>;
+  if (source.ok !== true) {
+    return result;
+  }
+  return {
+    ok: true,
+    source: source.source,
+    business: source.business,
+    domain: source.domain,
+    cacheStatus: source.cacheStatus,
+    bbbCoverage: compactBbbCoverage(source.bbbCoverage),
+    wikipediaBusinessContext: compactWikipediaBusinessContext(source.wikipediaBusinessContext),
+    marketFinancials: compactMarketFinancials(source.marketFinancials),
+    financialDisclosures: compactFinancialDisclosures(source.financialDisclosures),
+    sourceStatuses: source.sourceStatuses,
+    caveat: source.caveat,
+  };
+}
+
+function compactBbbCoverage(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  const relatedProfiles = Array.isArray(source.relatedProfiles) ? source.relatedProfiles.slice(0, 4) : source.relatedProfiles;
+  return {
+    exactBusiness: source.exactBusiness,
+    exactProfileCount: source.exactProfileCount,
+    relatedProfileCount: source.relatedProfileCount,
+    hasExactProfile: source.hasExactProfile,
+    hasRelatedProfiles: source.hasRelatedProfiles,
+    summary: source.summary,
+    relatedProfiles,
+  };
+}
+
+function compactWikipediaBusinessContext(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  return {
+    ok: source.ok,
+    title: source.title,
+    description: source.description,
+    extract: typeof source.extract === "string" ? source.extract.slice(0, 360) : source.extract,
+    url: source.url,
+    caveat: source.caveat,
+  };
+}
+
+function compactMarketFinancials(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  return {
+    ok: source.ok,
+    ticker: source.ticker,
+    quote: source.quote,
+    metrics: source.metrics,
+    sourceStatuses: source.sourceStatuses,
+  };
+}
+
+function compactFinancialDisclosures(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  return {
+    ok: source.ok,
+    company: source.company,
+    recentFilings: Array.isArray(source.recentFilings) ? source.recentFilings.slice(0, 3) : source.recentFilings,
+    secCompanyPage: source.secCompanyPage,
   };
 }
 

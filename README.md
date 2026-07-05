@@ -191,6 +191,8 @@ The pipeline deduplicates indicators through `osint_extract_indicators`, applies
 
 High-effort pipeline output keeps expanded hostnames in one canonical place: `results.derivedIndicators.hosts`. Stage-level results avoid repeating those hostnames back into the agent context.
 
+High-effort pipeline also returns `results.businessReputationSummary` before compacted `results.businessReputation`, so exact BBB misses and related BBB hits survive tool-output truncation.
+
 ### `osint_cdn_ddos_detect`
 
 Inspects a public URL or domain for CDN, WAF, and DDoS-protection signals.
