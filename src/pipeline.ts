@@ -1,6 +1,5 @@
 import { Type, type Static } from "typebox";
 import { OsintCache } from "./cache.js";
-import { queryCrtshDomainForTool } from "./crtsh.js";
 import { queryDomainAuthorityIntelForTool } from "./domain-authority.js";
 import { queryDomainNetworkIntelForTool } from "./domain-network.js";
 import {
@@ -109,15 +108,10 @@ export async function pipelineReconForTool(
     const emails = uniqueBounded([...indicators.emails, ...derivedIndicators.emails], maxLookups);
     const phones = uniqueBounded(derivedIndicators.phones, maxLookups);
     const hashes = indicators.hashes.slice(0, maxLookups);
-    const [tlsCertificates, crtshDomains, infraReputation, hibpEmails, phoneReputation, pwnedHashes] = await Promise.all([
+    const [tlsCertificates, infraReputation, hibpEmails, phoneReputation, pwnedHashes] = await Promise.all([
       Promise.all(
         domains.map((domain) =>
           queryTlsCertificateChainForTool({ host: domain })
-        ),
-      ),
-      params.skipHighExpansion ? Promise.resolve([]) : Promise.all(
-        domains.map((domain) =>
-          queryCrtshDomainForTool({ domain, limit: 25, refresh: params.refresh, signal: params.signal, cache })
         ),
       ),
       Promise.all(
@@ -147,7 +141,7 @@ export async function pipelineReconForTool(
         ),
       ),
     ]);
-    stages.push("domain_authority_intel", "ip_assignment_intel", "tls_certificate_chain", "crtsh_domain", "infra_reputation", "hibp_email_breach", "phone_reputation", "pwned_password_hash");
+    stages.push("domain_authority_intel", "ip_assignment_intel", "tls_certificate_chain", "infra_reputation", "hibp_email_breach", "phone_reputation", "pwned_password_hash");
     return {
       ok: true,
       effort: params.effort,
@@ -161,11 +155,17 @@ export async function pipelineReconForTool(
         ipAssignments,
         tlsCertificates,
         derivedIndicators,
-        crtshDomains,
         infraReputation,
         hibpEmails,
         phoneReputation,
         pwnedHashes,
+        deferredSources: [
+          {
+            source: "crt.sh",
+            tool: "osint_crtsh_domain",
+            reason: "Certificate transparency lookup is intentionally not run by default in high pipeline because crt.sh is frequently slow or unavailable. Use the standalone tool when CT history is specifically needed.",
+          },
+        ],
       },
       caveat:
         "High recon is bounded by maxLookups and available API keys. HIBP email checks require HIBP_API_KEY; failed keyed checks are returned as errors.",

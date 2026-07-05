@@ -93,6 +93,9 @@ describe("openclaw osint tools", () => {
 
       assert.equal(result.results.domainNetwork[0].ok, true);
       assert.equal(result.results.domainAuthority.length, 1);
+      assert.equal(result.stages.includes("crtsh_domain"), false);
+      assert.equal("crtshDomains" in result.results, false);
+      assert.equal(result.results.deferredSources[0].tool, "osint_crtsh_domain");
       assert.equal(result.results.infraReputation.length, 1);
       assert.equal(result.results.infraReputation[0].ip, result.results.domainNetwork[0].dns[0].address);
     } finally {

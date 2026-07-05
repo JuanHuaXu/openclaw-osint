@@ -69,7 +69,6 @@ flowchart TD
   Pipeline --> Extract
   Pipeline --> Web
   Pipeline --> Network
-  Pipeline --> Certs
   Pipeline --> Infra
   Pipeline --> Hibp
 ```
@@ -145,13 +144,15 @@ Runs bounded recon from raw text by effort level:
 
 - `light`: local indicator extraction only
 - `medium`: URL snapshots and domain network intel
-- `high`: medium plus TLS certificate chain inspection, authority DNS/RDAP, crt.sh, RIR IP assignment RDAP, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for RDAP-derived phone contacts, and pwned-password hash checks where indicators exist
+- `high`: medium plus TLS certificate chain inspection, authority DNS/RDAP, RIR IP assignment RDAP, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for RDAP-derived phone contacts, and pwned-password hash checks where indicators exist
 
-The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline. RDAP-derived contact indicators are reputation inputs only, not identity proof.
+The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline. RDAP-derived contact indicators are reputation inputs only, not identity proof. `crt.sh` remains available through `osint_crtsh_domain`, but high-effort pipeline reports it as a deferred optional source because the public service is often slow or unavailable.
 
 ### `osint_crtsh_domain`
 
 Looks up certificate transparency names for a public domain using `crt.sh`.
+
+This is a standalone optional enrichment tool. `osint_pipeline_recon` does not call it by default because `crt.sh` frequently times out or returns transient gateway errors.
 
 Returns:
 
@@ -336,7 +337,7 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.10.0.tgz
+openclaw plugins install ./openclaw-osint-0.10.1.tgz
 ```
 
 Restart the OpenClaw gateway after install.
