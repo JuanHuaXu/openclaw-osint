@@ -6,145 +6,113 @@ This plugin is intentionally conservative. It provides useful public-source prim
 
 ## Flow
 
+### Request Routing
+
 ```mermaid
 flowchart TD
   Request["User or agent request"] --> Plugin["OpenClaw OSINT plugin"]
-  Plugin --> Extract["osint_extract_indicators"]
-  Plugin --> Web["osint_url_snapshot"]
-  Plugin --> CdnDetect["osint_cdn_ddos_detect"]
-  Plugin --> Business["osint_business_reputation_lookup"]
-  Plugin --> Certs["osint_crtsh_domain"]
-  Plugin --> Network["osint_domain_network_intel"]
-  Plugin --> Authority["osint_domain_authority_intel"]
-  Plugin --> Phone["osint_phone_reputation"]
-  Plugin --> Voip["osint_voip_path_assess"]
-  Plugin --> Infra["osint_infra_reputation"]
-  Plugin --> IpRdap["osint_ip_assignment_intel"]
-  Plugin --> ShodanHost["osint_shodan_host"]
-  Plugin --> ShodanDb["osint_shodan_internetdb_host"]
-  Plugin --> Tls["osint_tls_certificate_chain"]
-  Plugin --> Bot["osint_bot_identity_assess"]
-  Plugin --> Hibp["HIBP tools"]
-  Plugin --> CacheStatus["osint_cache_status"]
   Plugin --> Pipeline["osint_pipeline_recon"]
-
-  Web --> Ssrfg["OpenClaw SSRF guard"]
-  CdnDetect --> Ssrfg
-  CdnDetect --> Network
-  CdnDetect --> Tls
-  Business --> LinkedIn["LinkedIn public company leads"]
-  Business --> Glassdoor["Glassdoor company review leads"]
-  Business --> FtcBiz["FTC release/API + official search leads"]
-  Business --> Bbb["BBB public directory search"]
-  Business --> Market["Yahoo chart market snapshot"]
-  Business --> Sec["SEC EDGAR disclosures"]
-  Business --> SecFacts["SEC company facts"]
-  Business --> UkRegister["UK Companies House"]
-  Business --> EuRegister["EU/EEA BRIS leads"]
-  Business --> AuRegister["Australian ABN Lookup"]
-  Business --> AsiaRegister["Asia official register leads"]
-  Certs --> Crtsh["crt.sh"]
-  Network --> Dns["Local DNS"]
-  Network --> Bgp["bgp.tools WHOIS"]
-  Network --> IpRdap
-  IpRdap --> Rir["IANA IP RDAP bootstrap + RIR RDAP"]
-  Authority --> AuthDns["Authority DNS records"]
-  Authority --> Rdap["IANA RDAP bootstrap + domain RDAP"]
-  Phone --> Ftc["FTC DNC if configured"]
-  Phone --> Leads["Telecom source leads"]
-  Voip --> Observed["Operator-supplied SIP/RTP IPs"]
-  Observed --> Bgp
-  Infra --> Spamhaus["Spamhaus DROP"]
-  Infra --> Abuse["AbuseIPDB if configured"]
-  ShodanHost --> ShodanApi["Shodan host API if configured"]
-  ShodanHost --> InternetDb
-  ShodanDb --> InternetDb["Shodan InternetDB keyless host summary"]
-  Tls --> CertChain["TLS peer certificate chain"]
-  Hibp --> HibpApi["Have I Been Pwned"]
-
-  Crtsh --> Cache["SQLite OSINT cache"]
-  Rdap --> Cache
-  Rir --> Cache
-  Bgp --> Cache
-  Ftc --> Cache
-  FtcBiz --> Cache
-  Bbb --> Cache
-  Market --> Cache
-  Sec --> Cache
-  SecFacts --> Cache
-  UkRegister --> Cache
-  AuRegister --> Cache
-  AsiaRegister --> Cache
-  Spamhaus --> Cache
-  ShodanApi --> Cache
-  InternetDb --> Cache
-  HibpApi --> Cache
-  CacheStatus --> Cache
-
-  Leads --> Didww["DIDWW DID/prefix leads"]
-  Leads --> Ovh["OVH authenticated inventory lead"]
-  Leads --> Codes["Country-code references"]
-  Leads --> Blocked["Blocked person-search surfaces"]
-
-  Network --> Evidence["Bounded reputation/context evidence"]
-  Authority --> Evidence
-  Authority --> Business
-  Network --> Business
-  Tls --> Evidence
-  Authority --> Phone
-  Authority --> Hibp
-  Phone --> Evidence
-  Voip --> Evidence
-  Infra --> Evidence
-  Evidence --> Bot
-  Bot --> Guard["No private human identity resolution"]
-  Blocked --> Guard
-  Pipeline --> Extract
-  Pipeline --> Web
-  Pipeline --> Network
-  Pipeline --> Infra
-  Pipeline --> Hibp
+  Plugin --> Indicators["osint_extract_indicators"]
+  Plugin --> Url["URL / HTTP tools"]
+  Plugin --> Domain["Domain / IP tools"]
+  Plugin --> Reputation["Reputation tools"]
+  Plugin --> Business["Business tools"]
+  Plugin --> Cache["osint_cache_status"]
 ```
+
+### Pipeline Effort Levels
 
 ```mermaid
 flowchart TD
   Text["Raw text, logs, URLs, or transcript"] --> Extract["osint_extract_indicators"]
-  Extract --> Urls["URLs"]
+  Extract --> Light["light: indicators only"]
+  Extract --> Medium["medium: URL + domain enrichment"]
+  Medium --> High["high: broader bounded correlation"]
+  High --> Findings["keyFindings + compacted results"]
+```
+
+### Indicator Fan-Out
+
+```mermaid
+flowchart TD
+  Extract["osint_extract_indicators"] --> Urls["URLs"]
   Extract --> Domains["Domains"]
-  Extract --> Ips["IPv4 addresses"]
-  Extract --> Emails["Email addresses"]
-  Extract --> Handles["Handles"]
+  Extract --> Ips["IP addresses"]
+  Extract --> Emails["Emails"]
+  Extract --> Phones["Explicit phone numbers"]
   Extract --> Hashes["Hashes"]
 
   Urls --> Snapshot["osint_url_snapshot"]
-  Urls --> CdnDetect["osint_cdn_ddos_detect"]
-  Domains --> Certs["osint_crtsh_domain"]
-  Domains --> CdnDetect
   Domains --> Network["osint_domain_network_intel"]
   Domains --> Authority["osint_domain_authority_intel"]
   Domains --> Tls["osint_tls_certificate_chain"]
+  Ips --> IpIntel["osint_ip_assignment_intel"]
   Ips --> Infra["osint_infra_reputation"]
-  Ips --> IpRdap["osint_ip_assignment_intel"]
-  Ips --> ShodanHost["osint_shodan_host"]
-  Ips --> ShodanDb["osint_shodan_internetdb_host"]
-  Emails --> HibpEmail["osint_hibp_email_breach"]
-  Hashes --> PwnedHash["osint_pwned_password_hash"]
-  Authority --> DerivedEmails["RDAP-derived emails"]
-  Authority --> DerivedPhones["RDAP-derived phones"]
-  Authority --> Business["osint_business_reputation_lookup"]
-  Network --> Business
-  DerivedEmails --> HibpEmail
-  DerivedPhones --> PhoneRep
+  Ips --> Shodan["osint_shodan_host / InternetDB"]
+  Emails --> Hibp["osint_hibp_email_breach"]
+  Phones --> PhoneRep["osint_phone_reputation"]
+  Hashes --> Pwned["osint_pwned_password_hash"]
+```
 
-  Phone["Phone numbers: direct input"] --> PhoneRep["osint_phone_reputation"]
-  Sip["SIP/RTP IPs: operator evidence"] --> Voip["osint_voip_path_assess"]
+### URL And Fingerprint Flow
 
-  Network --> Bot["osint_bot_identity_assess"]
-  Infra --> Bot
-  ShodanHost --> Bot
-  ShodanDb --> Bot
-  PhoneRep --> Bot
-  Voip --> Bot
+```mermaid
+flowchart TD
+  Url["Public HTTP(S) URL"] --> Guard["OpenClaw SSRF guard"]
+  Guard --> Snapshot["osint_url_snapshot"]
+  Snapshot --> Metadata["status, title, canonical URL, excerpt"]
+  Snapshot --> Fingerprint["passive software / OS fingerprints"]
+  Fingerprint --> Headers["headers and cookies"]
+  Fingerprint --> Body["HTML / asset markers"]
+  Fingerprint --> Probe["one randomized same-origin 404 probe"]
+  Probe --> ErrorBody["bounded error-page evidence"]
+```
+
+### Domain And Network Flow
+
+```mermaid
+flowchart TD
+  Domain["Domain"] --> Dns["Local DNS"]
+  Domain --> Authority["authority DNS + domain RDAP"]
+  Dns --> Ips["Resolved IPs"]
+  Ips --> Bgp["bgp.tools WHOIS"]
+  Ips --> Rir["IANA IP RDAP bootstrap + RIR RDAP"]
+  Ips --> Shodan["Shodan API or keyless InternetDB"]
+  Domain --> Tls["TLS peer certificate chain"]
+  Domain --> Cdn["CDN / WAF / DDoS heuristic"]
+  Authority --> Contacts["bounded RDAP contact indicators"]
+  Tls --> DerivedHosts["SAN-derived hostnames"]
+```
+
+### Business And Reputation Flow
+
+```mermaid
+flowchart TD
+  Org["WHOIS / RDAP / BGP / Wikidata org names"] --> Business["osint_business_reputation_lookup"]
+  Business --> Ftc["FTC release/API + official search leads"]
+  Business --> Bbb["BBB directory leads"]
+  Business --> Markets["Yahoo chart + SEC disclosures/facts"]
+  Business --> Registers["UK / EU / Australia / Asia register leads"]
+  Business --> Profiles["LinkedIn / Glassdoor public leads"]
+
+  Ips["IP indicators"] --> Infra["Spamhaus + optional AbuseIPDB"]
+  Emails["Email indicators"] --> Hibp["HIBP when configured"]
+  Phones["Explicit phones"] --> PhoneRep["FTC DNC when configured"]
+  Sip["Operator-supplied SIP/RTP IPs"] --> Voip["VoIP path mismatch assessment"]
+```
+
+### Cache And Guardrails
+
+```mermaid
+flowchart TD
+  NetworkSources["Cacheable network sources"] --> Cache["SQLite OSINT cache"]
+  CacheStatus["osint_cache_status"] --> Cache
+  Cache --> Bounded["bounded result objects"]
+  Bounded --> Agent["agent-visible evidence"]
+
+  PersonSearch["person-search / private identity surfaces"] --> Blocked["blocked or lead-only"]
+  BotAssess["osint_bot_identity_assess"] --> Guard["no private human identity resolution"]
+  Blocked --> Guard
 ```
 
 Pipeline effort levels:
