@@ -1,6 +1,6 @@
 {
   "id": "osint",
-  "version": "0.10.2",
+  "version": "0.17.0",
   "activation": {
     "onStartup": true
   },
@@ -16,6 +16,8 @@
     "tools": [
       "osint_extract_indicators",
       "osint_url_snapshot",
+      "osint_cdn_ddos_detect",
+      "osint_business_reputation_lookup",
       "osint_crtsh_domain",
       "osint_domain_network_intel",
       "osint_domain_authority_intel",
@@ -26,6 +28,8 @@
       "osint_phone_reputation",
       "osint_infra_reputation",
       "osint_ip_assignment_intel",
+      "osint_shodan_internetdb_host",
+      "osint_shodan_host",
       "osint_tls_certificate_chain",
       "osint_bot_identity_assess",
       "osint_voip_path_assess",

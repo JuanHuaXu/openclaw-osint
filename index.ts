@@ -1,5 +1,13 @@
 import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
 import {
+  BusinessReputationLookupSchema,
+  queryBusinessReputationForTool,
+} from "./src/business.js";
+import {
+  CdnDdosDetectSchema,
+  detectCdnDdosForTool,
+} from "./src/cdn.js";
+import {
   CrtshDomainSchema,
   OsintCacheStatusSchema,
   osintCacheStatusForTool,
@@ -36,6 +44,12 @@ import {
   queryIpAssignmentIntelForTool,
 } from "./src/ip-assignment.js";
 import {
+  ShodanHostSchema,
+  ShodanInternetDbHostSchema,
+  queryShodanHostForTool,
+  queryShodanInternetDbHostForTool,
+} from "./src/shodan.js";
+import {
   TlsCertificateChainSchema,
   queryTlsCertificateChainForTool,
 } from "./src/tls-certificate.js";
@@ -71,6 +85,24 @@ export default defineToolPlugin({
       parameters: UrlSnapshotSchema,
       execute: (params, _config, context) =>
         snapshotUrlForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_cdn_ddos_detect",
+      label: "OSINT CDN/DDoS Protection Detector",
+      description:
+        "Inspect a public URL or domain for CDN, WAF, or DDoS-protection signals such as Cloudflare, Akamai, Fastly, CloudFront, Imperva, or Sucuri.",
+      parameters: CdnDdosDetectSchema,
+      execute: (params, _config, context) =>
+        detectCdnDdosForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_business_reputation_lookup",
+      label: "OSINT Business Reputation Lookup",
+      description:
+        "Check public FTC/BBB business reputation leads for a company or organization name discovered from WHOIS/RDAP/BGP evidence.",
+      parameters: BusinessReputationLookupSchema,
+      execute: (params, _config, context) =>
+        queryBusinessReputationForTool({ ...params, signal: context.signal }),
     }),
     tool({
       name: "osint_crtsh_domain",
@@ -159,6 +191,24 @@ export default defineToolPlugin({
       parameters: IpAssignmentIntelSchema,
       execute: (params, _config, context) =>
         queryIpAssignmentIntelForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_shodan_internetdb_host",
+      label: "OSINT Shodan InternetDB Host",
+      description:
+        "Check a public IP with Shodan InternetDB's keyless host summary for open ports, hostnames, CPEs, tags, and CVE IDs.",
+      parameters: ShodanInternetDbHostSchema,
+      execute: (params, _config, context) =>
+        queryShodanInternetDbHostForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_shodan_host",
+      label: "OSINT Shodan Host",
+      description:
+        "Check a public IP with full Shodan host lookup when SHODAN_API_KEY is configured, otherwise fall back to keyless Shodan InternetDB.",
+      parameters: ShodanHostSchema,
+      execute: (params, _config, context) =>
+        queryShodanHostForTool({ ...params, signal: context.signal }),
     }),
     tool({
       name: "osint_tls_certificate_chain",

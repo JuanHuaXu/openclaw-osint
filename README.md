@@ -11,6 +11,8 @@ flowchart TD
   Request["User or agent request"] --> Plugin["OpenClaw OSINT plugin"]
   Plugin --> Extract["osint_extract_indicators"]
   Plugin --> Web["osint_url_snapshot"]
+  Plugin --> CdnDetect["osint_cdn_ddos_detect"]
+  Plugin --> Business["osint_business_reputation_lookup"]
   Plugin --> Certs["osint_crtsh_domain"]
   Plugin --> Network["osint_domain_network_intel"]
   Plugin --> Authority["osint_domain_authority_intel"]
@@ -18,6 +20,8 @@ flowchart TD
   Plugin --> Voip["osint_voip_path_assess"]
   Plugin --> Infra["osint_infra_reputation"]
   Plugin --> IpRdap["osint_ip_assignment_intel"]
+  Plugin --> ShodanHost["osint_shodan_host"]
+  Plugin --> ShodanDb["osint_shodan_internetdb_host"]
   Plugin --> Tls["osint_tls_certificate_chain"]
   Plugin --> Bot["osint_bot_identity_assess"]
   Plugin --> Hibp["HIBP tools"]
@@ -25,6 +29,18 @@ flowchart TD
   Plugin --> Pipeline["osint_pipeline_recon"]
 
   Web --> Ssrfg["OpenClaw SSRF guard"]
+  CdnDetect --> Ssrfg
+  CdnDetect --> Network
+  CdnDetect --> Tls
+  Business --> LinkedIn["LinkedIn public company leads"]
+  Business --> Glassdoor["Glassdoor company review leads"]
+  Business --> FtcBiz["FTC release/API + official search leads"]
+  Business --> Bbb["BBB public directory search"]
+  Business --> Sec["SEC EDGAR disclosures"]
+  Business --> UkRegister["UK Companies House"]
+  Business --> EuRegister["EU/EEA BRIS leads"]
+  Business --> AuRegister["Australian ABN Lookup"]
+  Business --> AsiaRegister["Asia official register leads"]
   Certs --> Crtsh["crt.sh"]
   Network --> Dns["Local DNS"]
   Network --> Bgp["bgp.tools WHOIS"]
@@ -38,6 +54,9 @@ flowchart TD
   Observed --> Bgp
   Infra --> Spamhaus["Spamhaus DROP"]
   Infra --> Abuse["AbuseIPDB if configured"]
+  ShodanHost --> ShodanApi["Shodan host API if configured"]
+  ShodanHost --> InternetDb
+  ShodanDb --> InternetDb["Shodan InternetDB keyless host summary"]
   Tls --> CertChain["TLS peer certificate chain"]
   Hibp --> HibpApi["Have I Been Pwned"]
 
@@ -46,7 +65,15 @@ flowchart TD
   Rir --> Cache
   Bgp --> Cache
   Ftc --> Cache
+  FtcBiz --> Cache
+  Bbb --> Cache
+  Sec --> Cache
+  UkRegister --> Cache
+  AuRegister --> Cache
+  AsiaRegister --> Cache
   Spamhaus --> Cache
+  ShodanApi --> Cache
+  InternetDb --> Cache
   HibpApi --> Cache
   CacheStatus --> Cache
 
@@ -57,6 +84,8 @@ flowchart TD
 
   Network --> Evidence["Bounded reputation/context evidence"]
   Authority --> Evidence
+  Authority --> Business
+  Network --> Business
   Tls --> Evidence
   Authority --> Phone
   Authority --> Hibp
@@ -84,16 +113,22 @@ flowchart TD
   Extract --> Hashes["Hashes"]
 
   Urls --> Snapshot["osint_url_snapshot"]
+  Urls --> CdnDetect["osint_cdn_ddos_detect"]
   Domains --> Certs["osint_crtsh_domain"]
+  Domains --> CdnDetect
   Domains --> Network["osint_domain_network_intel"]
   Domains --> Authority["osint_domain_authority_intel"]
   Domains --> Tls["osint_tls_certificate_chain"]
   Ips --> Infra["osint_infra_reputation"]
   Ips --> IpRdap["osint_ip_assignment_intel"]
+  Ips --> ShodanHost["osint_shodan_host"]
+  Ips --> ShodanDb["osint_shodan_internetdb_host"]
   Emails --> HibpEmail["osint_hibp_email_breach"]
   Hashes --> PwnedHash["osint_pwned_password_hash"]
   Authority --> DerivedEmails["RDAP-derived emails"]
   Authority --> DerivedPhones["RDAP-derived phones"]
+  Authority --> Business["osint_business_reputation_lookup"]
+  Network --> Business
   DerivedEmails --> HibpEmail
   DerivedPhones --> PhoneRep
 
@@ -102,6 +137,8 @@ flowchart TD
 
   Network --> Bot["osint_bot_identity_assess"]
   Infra --> Bot
+  ShodanHost --> Bot
+  ShodanDb --> Bot
   PhoneRep --> Bot
   Voip --> Bot
 ```
@@ -110,7 +147,7 @@ Pipeline effort levels:
 
 - `light`: extract indicators only, no network lookups
 - `medium`: extract indicators, then enrich bounded URLs and domains
-- `high`: extract indicators, enrich URLs/domains, then correlate TLS certificate chains, DNS-discovered IPs, RIR allocation records, and RDAP-derived emails/phones into reputation checks
+- `high`: extract indicators, enrich URLs/domains, then correlate TLS certificate chains, DNS-discovered IPs, RIR allocation records, Shodan host summaries, WHOIS/RDAP-derived business names, professional/workplace/disclosure leads, and RDAP-derived emails/phones into reputation checks. Host indicators are aggregated once from input domains, email domains, TLS SANs, Shodan hostnames, and related host sources.
 
 ## Tools
 
@@ -144,9 +181,52 @@ Runs bounded recon from raw text by effort level:
 
 - `light`: local indicator extraction only
 - `medium`: URL snapshots and domain network intel
-- `high`: medium plus TLS certificate chain inspection, authority DNS/RDAP, RIR IP assignment RDAP, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for RDAP-derived phone contacts, and pwned-password hash checks where indicators exist
+- `high`: medium plus TLS certificate chain inspection, CDN/DDoS protection detection, authority DNS/RDAP, RIR IP assignment RDAP, Shodan host summaries for input or DNS-discovered IPs, business reputation/professional/workplace/disclosure leads for WHOIS/RDAP/BGP-derived organization names, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for RDAP-derived phone contacts, and pwned-password hash checks where indicators exist
 
-The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline. RDAP-derived contact indicators are reputation inputs only, not identity proof. `crt.sh` remains available through `osint_crtsh_domain`, but high-effort pipeline reports it as a deferred optional source because the public service is often slow or unavailable.
+The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline. Shodan host checks use the full API when `SHODAN_API_KEY` exists and fall back to keyless InternetDB when it does not. RDAP-derived contact indicators and business-source hits are reputation inputs only, not identity proof or complete complaint history. `crt.sh` remains available through `osint_crtsh_domain`, but high-effort pipeline reports it as a deferred optional source because the public service is often slow or unavailable.
+
+High-effort pipeline output keeps expanded hostnames in one canonical place: `results.derivedIndicators.hosts`. Stage-level results avoid repeating those hostnames back into the agent context.
+
+### `osint_cdn_ddos_detect`
+
+Inspects a public URL or domain for CDN, WAF, and DDoS-protection signals.
+
+Evidence sources:
+
+- selected HTTP response headers such as `server`, `via`, `cf-ray`, `x-cache`, `x-amz-cf-*`, `x-sucuri-*`, and similar edge headers
+- DNS/BGP ASN names from domain network intel
+- TLS certificate issuer, subject, and SAN metadata
+- observed hostnames from related stage data
+
+Recognized provider families include Cloudflare, Akamai, Fastly, Amazon CloudFront, Imperva, Sucuri, Google Cloud CDN, Azure Front Door, and Bunny CDN. Results include provider, category, confidence, and evidence snippets. Detection is heuristic; no match is not proof of no protection.
+
+### `osint_business_reputation_lookup`
+
+Checks public business reputation, professional-profile, workplace-review, and financial-disclosure leads for a company or organization name, especially names discovered from WHOIS/RDAP/BGP evidence.
+
+Sources and behavior:
+
+- queries the FTC release-notice JSON API by title when available
+- returns official FTC.gov and FTC legal-library search URLs for manual verification
+- queries the BBB public directory search page and extracts bounded BBB profile links when server-rendered links are present
+- returns LinkedIn company search and likely public company URL leads without credentialed scraping
+- returns Glassdoor company-review search leads without credentialed scraping
+- matches SEC EDGAR public-company records by ticker or normalized company name
+- returns recent SEC submission metadata and official SEC filing/company-facts URLs when a public-filer match exists
+- queries UK Companies House when `COMPANIES_HOUSE_API_KEY` or `UK_COMPANIES_HOUSE_API_KEY` is configured; otherwise returns official UK register search leads
+- returns EU/EEA BRIS and national-register leads for European companies
+- queries Australian ABN Lookup when `ABN_LOOKUP_GUID` or `AU_ABN_LOOKUP_GUID` is configured; otherwise returns official ABN Lookup search leads
+- returns Asia official-register leads for Japan, China, and Taiwan
+- queries Taiwan GCIS open company-registration data when `registryId` is an 8-digit Taiwan Unified Business Number; otherwise returns Taiwan findbiz/GCIS leads
+- returns Japan National Tax Agency Corporate Number and gBizINFO leads without scraping; gBizINFO API-backed use requires a token
+- returns China GSXT official portal leads without scraping; public GSXT access is interactive and may require CAPTCHA
+- caches aggregate output locally
+- accepts optional related domain, ticker, and registry identifier fields as query context, not ownership proof
+- does not claim FTC Consumer Sentinel business complaint history, because that database is not publicly queryable by business
+- treats BBB coverage as directory/reputation context, not an authoritative business verdict
+- treats LinkedIn and Glassdoor output as search/profile leads only
+- treats SEC output as official disclosure evidence only for matched public filers; no SEC match is expected for many private companies
+- treats UK/EU/Australia/Asia register output as jurisdictional registration/disclosure context; availability depends on register coverage, public API availability, and configured credentials
 
 ### `osint_crtsh_domain`
 
@@ -282,6 +362,35 @@ Sources:
 
 The result classifies service/spam infrastructure likelihood without identifying a private human owner.
 
+### `osint_shodan_host`
+
+Checks a public IP with Shodan host enrichment.
+
+Behavior:
+
+- uses full Shodan `/shodan/host/{ip}` when `SHODAN_API_KEY` is configured
+- otherwise falls back to Shodan InternetDB without failing the pipeline
+- defaults to compact/minified keyed lookup; `includeBanners` returns bounded service summaries, not raw banners
+- supports optional keyed `history`
+- returns ports, hostnames, domains, tags, CVE IDs, organization/ASN metadata where available, and mode/source metadata
+
+This is the high-effort pipeline's default Shodan path.
+
+### `osint_shodan_internetdb_host`
+
+Checks a public IP against Shodan InternetDB, the keyless host-summary endpoint.
+
+Returns:
+
+- observed open ports
+- hostnames
+- CPE strings
+- tags
+- CVE IDs when InternetDB exposes vulnerability metadata
+- compact counts for hostnames, ports, and vulnerabilities
+
+The high-effort pipeline runs `osint_shodan_host`, which falls back to this keyless source when `SHODAN_API_KEY` is absent. This standalone tool never requires `SHODAN_API_KEY` and does not return full Shodan banners.
+
 ### `osint_bot_identity_assess`
 
 Combines explicit evidence into a bot/service identity assessment.
@@ -328,6 +437,8 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 - HIBP email cache TTL: 24 hours
 - HIBP latest breach cache TTL: 1 hour
 - FTC phone reputation cache TTL: 6 hours
+- Shodan host API cache TTL: 6 hours
+- Shodan InternetDB cache TTL: 24 hours
 - Spamhaus DROP cache TTL: 12 hours
 - per-source cache pruning: latest 250 source targets
 - no shell execution, scanning, credentialed APIs, or private-data-broker lookups

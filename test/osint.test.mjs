@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { OsintCache } from "../dist/src/cache.js";
+import { testing as businessTesting } from "../dist/src/business.js";
+import { testing as cdnTesting } from "../dist/src/cdn.js";
 import { testing as crtshTesting } from "../dist/src/crtsh.js";
 import { testing as domainAuthorityTesting } from "../dist/src/domain-authority.js";
 import { testing as domainNetworkTesting } from "../dist/src/domain-network.js";
@@ -11,6 +13,7 @@ import { testing as hibpTesting } from "../dist/src/hibp.js";
 import { testing as ipAssignmentTesting } from "../dist/src/ip-assignment.js";
 import { pipelineReconForTool } from "../dist/src/pipeline.js";
 import { testing as reputationTesting } from "../dist/src/reputation.js";
+import { testing as shodanTesting } from "../dist/src/shodan.js";
 import { testing as tlsCertificateTesting } from "../dist/src/tls-certificate.js";
 import { testing } from "../dist/src/tools.js";
 
@@ -67,6 +70,26 @@ describe("openclaw osint tools", () => {
     const cache = new OsintCache(join(dir, "osint.sqlite"));
     try {
       cache.putSource({
+        source: "shodan-internetdb",
+        target: "93.184.216.34",
+        fetchedAt: Date.now(),
+        expiresAt: Date.now() + 60_000,
+        rawJson: JSON.stringify({
+          ok: true,
+          source: "shodan-internetdb",
+          ip: "93.184.216.34",
+          found: true,
+          ports: [80, 443],
+          hostnames: ["edge.example.net"],
+          cpes: [],
+          tags: [],
+          vulnerabilities: [],
+          summary: { openPortCount: 2, vulnerabilityCount: 0, hostnameCount: 1 },
+        }),
+        rawBytes: 2,
+        status: "ok",
+      });
+      cache.putSource({
         source: "bgp-tools-whois",
         target: "93.184.216.34",
         fetchedAt: Date.now(),
@@ -83,10 +106,31 @@ describe("openclaw osint tools", () => {
         rawBytes: 2,
         status: "ok",
       });
+      for (const business of ["Cloudflare, Inc.", "EDGECAST"]) {
+        cache.putSource({
+          source: "business-reputation",
+          target: `${business}|example.com`,
+          fetchedAt: Date.now(),
+          expiresAt: Date.now() + 60_000,
+          rawJson: JSON.stringify({
+            ok: true,
+            source: "business-reputation",
+            business,
+            domain: "example.com",
+            ftcReleaseNotices: { ok: true, source: "ftc-release-notices", results: [] },
+            bbbSearch: { ok: true, source: "bbb-business-search", profileLeads: [] },
+            searchLeads: [],
+            sourceStatuses: [],
+            caveat: "cached test result",
+          }),
+          rawBytes: 2,
+          status: "ok",
+        });
+      }
       const result = await pipelineReconForTool({
         effort: "high",
         maxLookups: 1,
-        text: "https://example.com",
+        text: "93.184.216.34 https://example.com contact abuse@mail.example.net",
         cache,
         skipHighExpansion: true,
       });
@@ -97,7 +141,16 @@ describe("openclaw osint tools", () => {
       assert.equal("crtshDomains" in result.results, false);
       assert.equal(result.results.deferredSources[0].tool, "osint_crtsh_domain");
       assert.equal(result.results.infraReputation.length, 1);
-      assert.equal(result.results.infraReputation[0].ip, result.results.domainNetwork[0].dns[0].address);
+      assert.equal(result.results.infraReputation[0].ip, "93.184.216.34");
+      assert.equal(result.results.shodanHost.length, 1);
+      assert.deepEqual(result.results.shodanHost[0].ports, [80, 443]);
+      assert.equal(result.results.cdnDdosProtection.length, 1);
+      assert.equal(result.results.businessReputation.length, 1);
+      assert.equal(["Cloudflare, Inc.", "EDGECAST"].includes(result.results.businessReputation[0].business), true);
+      assert.equal(result.results.derivedIndicators.hosts.includes("example.com"), true);
+      assert.equal(result.results.derivedIndicators.hosts.includes("mail.example.net"), true);
+      assert.equal(result.results.derivedIndicators.hosts.includes("edge.example.net"), true);
+      assert.equal(JSON.stringify(result).match(/derivedIndicators/g)?.length, 1);
     } finally {
       cache.close();
       rmSync(dir, { recursive: true, force: true });
@@ -131,6 +184,155 @@ describe("openclaw osint tools", () => {
     ]);
   });
 
+  it("normalizes business reputation lookup rows and BBB profile leads", () => {
+    assert.equal(businessTesting.normalizeBusinessName(" Example Corp  Inc. "), "Example Corp Inc.");
+    assert.equal(businessTesting.normalizeBusinessName("https://example.com"), undefined);
+    assert.equal(businessTesting.canonicalBusinessName("Example Holdings, Inc."), "example");
+    const ftcRows = businessTesting.normalizeFtcReleaseNoticeRows({
+      data: [
+        {
+          attributes: {
+            title: "FTC Action Against Example Corp",
+            created: "2026-01-02T00:00:00+00:00",
+            path: { alias: "/news-events/news/press-releases/example" },
+          },
+        },
+      ],
+    }, 5);
+    assert.deepEqual(ftcRows, [{
+      title: "FTC Action Against Example Corp",
+      date: "2026-01-02T00:00:00+00:00",
+      url: "https://www.ftc.gov/news-events/news/press-releases/example",
+    }]);
+    const bbbLinks = businessTesting.parseBbbProfileLinks(`
+      <a href="/us/ca/example/profile/internet/example-corp-123">one</a>
+      <a href="https://www.bbb.org/us/ca/example/profile/internet/example-corp-123">dup</a>
+    `, 5);
+    assert.deepEqual(bbbLinks, [{ url: "https://www.bbb.org/us/ca/example/profile/internet/example-corp-123" }]);
+    assert.equal(
+      businessTesting.buildProfessionalProfileLeads("Example Corp", "example.com")[0].source,
+      "linkedin-company-public-search",
+    );
+    assert.equal(
+      businessTesting.buildWorkplaceReviewLeads("Example Corp", "example.com")[0].source,
+      "glassdoor-company-search",
+    );
+  });
+
+  it("normalizes SEC company tickers and filing disclosure links", () => {
+    const companies = businessTesting.normalizeSecCompanyTickerRows({
+      0: { cik_str: 1234, ticker: "EXM", title: "EXAMPLE HOLDINGS INC" },
+    });
+    assert.deepEqual(companies, [{ cik: "0000001234", ticker: "EXM", title: "EXAMPLE HOLDINGS INC" }]);
+    const submissions = businessTesting.normalizeSecSubmissions({
+      filings: {
+        recent: {
+          form: ["10-K", "8-K"],
+          filingDate: ["2026-02-03", "2026-01-04"],
+          accessionNumber: ["0000001234-26-000001", "0000001234-26-000002"],
+          primaryDocument: ["exm-20260203.htm", "exm-20260104.htm"],
+        },
+      },
+    }, companies[0], 1, "https://data.sec.gov/submissions/CIK0000001234.json");
+
+    assert.equal(submissions.recentFilings.length, 1);
+    assert.equal(submissions.recentFilings[0].form, "10-K");
+    assert.equal(
+      submissions.recentFilings[0].url,
+      "https://www.sec.gov/Archives/edgar/data/1234/000000123426000001/exm-20260203.htm",
+    );
+    assert.equal(
+      submissions.companyFactsUrl,
+      "https://data.sec.gov/api/xbrl/companyfacts/CIK0000001234.json",
+    );
+  });
+
+  it("normalizes regional business register leads", () => {
+    const ukRows = businessTesting.normalizeCompaniesHouseSearchRows({
+      items: [{
+        title: "EXAMPLE LIMITED",
+        company_number: "01234567",
+        company_status: "active",
+        company_type: "ltd",
+        date_of_creation: "2020-01-02",
+      }],
+    }, 5);
+    assert.deepEqual(ukRows, [{
+      title: "EXAMPLE LIMITED",
+      companyNumber: "01234567",
+      companyStatus: "active",
+      companyType: "ltd",
+      dateOfCreation: "2020-01-02",
+      url: "https://find-and-update.company-information.service.gov.uk/company/01234567",
+    }]);
+
+    const auRows = businessTesting.normalizeAbnLookupRows({
+      Names: [{
+        Abn: "53 004 085 616",
+        Name: "BHP GROUP LIMITED",
+        State: "VIC",
+        Postcode: "3000",
+      }],
+    }, 5);
+    assert.deepEqual(auRows, [{
+      abn: "53 004 085 616",
+      name: "BHP GROUP LIMITED",
+      stateCode: "VIC",
+      postcode: "3000",
+      url: "https://abr.business.gov.au/ABN/View/53004085616",
+    }]);
+
+    assert.equal(
+      businessTesting.parseJsonOrJsonp('callback({"Names":[{"Abn":"1","Name":"Example"}]});').Names[0].Name,
+      "Example",
+    );
+    assert.equal(
+      businessTesting.buildEuBusinessRegisterLeads("Example GmbH").source,
+      "eu-bris-business-registers",
+    );
+    assert.equal(
+      businessTesting.normalizeRegistryId(" 2082 8393 "),
+      "20828393",
+    );
+    assert.equal(
+      businessTesting.taiwanGcisApiUrl("20828393", 1).includes("Business_Accounting_NO+eq+20828393"),
+      true,
+    );
+    const taiwanRows = businessTesting.normalizeTaiwanGcisRows([{
+      Business_Accounting_NO: "20828393",
+      Company_Status_Desc: "核准設立",
+      Company_Name: "宏碁股份有限公司",
+      Capital_Stock_Amount: 40000000000,
+      Paid_In_Capital_Amount: 30478538280,
+      Company_Location: "臺北市松山區民福里復興北路369號7樓之5",
+      Register_Organization_Desc: "商業發展署",
+      Company_Setup_Date: "0680718",
+      Change_Of_Approval_Data: "1150622",
+      Responsible_Name: "not emitted",
+    }], 5);
+    assert.deepEqual(taiwanRows, [{
+      unifiedBusinessNumber: "20828393",
+      companyName: "宏碁股份有限公司",
+      status: "核准設立",
+      capitalStockAmount: 40000000000,
+      paidInCapitalAmount: 30478538280,
+      location: "臺北市松山區民福里復興北路369號7樓之5",
+      registerOrganization: "商業發展署",
+      setupDate: "0680718",
+      changedAt: "1150622",
+      url: "https://findbiz.nat.gov.tw/fts/query/QueryBar/queryInit.do?fhl=en&request_locale=en&qryCond=20828393",
+    }]);
+    assert.equal("responsibleName" in taiwanRows[0], false);
+    assert.equal(
+      businessTesting.buildJapanBusinessRegisterLeads("Sony").source,
+      "jp-gbizinfo",
+    );
+    assert.equal(
+      businessTesting.buildChinaBusinessRegisterLeads("Tencent").source,
+      "cn-gsxt",
+    );
+  });
+
   it("extracts HTML metadata and visible text", () => {
     const html = `
       <html><head>
@@ -158,6 +360,25 @@ describe("openclaw osint tools", () => {
       testing.normalizeCanonicalUrl("javascript:alert(1)", "https://example.com/root"),
       undefined,
     );
+  });
+
+  it("detects CDN and DDoS protection providers from mixed evidence", () => {
+    const matches = cdnTesting.detectProviders({
+      headers: {
+        server: "cloudflare",
+        "cf-ray": "abc123-IAD",
+      },
+      bgpNames: ["Cloudflare, Inc."],
+      tlsIssuers: [],
+      tlsSubjects: [],
+      tlsAltNames: [],
+      hostnames: [],
+    });
+
+    assert.equal(cdnTesting.normalizeTarget("example.com")?.domain, "example.com");
+    assert.equal(matches[0].provider, "Cloudflare");
+    assert.equal(matches[0].category, "cdn_or_ddos_protection");
+    assert.equal(matches[0].confidence >= 0.8, true);
   });
 
   it("normalizes crt.sh rows into scoped observations", () => {
@@ -284,6 +505,53 @@ describe("openclaw osint tools", () => {
       dnsNames: ["example.com", "api.example.com"],
       ipAddresses: ["8.8.8.8"],
     });
+  });
+
+  it("normalizes Shodan InternetDB host summaries without requiring an API key", () => {
+    const result = shodanTesting.formatInternetDbResponse("8.8.8.8", {
+      ports: [443, 53, 443],
+      hostnames: ["dns.google", "dns.google"],
+      cpes: ["cpe:/a:example"],
+      tags: ["cdn"],
+      vulns: { "CVE-2024-0001": {}, "CVE-2024-0002": {} },
+    });
+
+    assert.equal(shodanTesting.normalizePublicIp("8.8.8.8"), "8.8.8.8");
+    assert.equal(shodanTesting.normalizePublicIp("10.0.0.1"), undefined);
+    assert.equal(shodanTesting.normalizePublicIp("2001:4860:4860::8888"), "2001:4860:4860::8888");
+    assert.deepEqual(result.ports, [53, 443]);
+    assert.deepEqual(result.vulnerabilities, ["CVE-2024-0001", "CVE-2024-0002"]);
+    assert.equal(result.summary.openPortCount, 2);
+  });
+
+  it("normalizes keyed Shodan host summaries without raw banners", () => {
+    const result = shodanTesting.formatShodanHostResponse("8.8.8.8", {
+      ip_str: "8.8.8.8",
+      ports: [443],
+      hostnames: ["dns.google"],
+      domains: ["google"],
+      org: "Google LLC",
+      asn: "AS15169",
+      vulns: ["CVE-2024-0001"],
+      data: [
+        {
+          port: 443,
+          transport: "tcp",
+          product: "Google Frontend",
+          version: "1.0",
+          data: "raw banner should not be copied",
+          http: { title: "Google DNS", server: "gws" },
+        },
+      ],
+    }, true);
+
+    assert.equal(result.source, "shodan-host");
+    assert.equal(result.provider, "shodan");
+    assert.equal(result.mode, "keyed_full");
+    assert.deepEqual(result.ports, [443]);
+    assert.deepEqual(result.vulnerabilities, ["CVE-2024-0001"]);
+    assert.equal(result.services[0].product, "Google Frontend");
+    assert.equal("data" in result.services[0], false);
   });
 
   it("keeps traceroute as an operator-side plan", () => {
