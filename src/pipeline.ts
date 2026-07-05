@@ -31,9 +31,12 @@ const PIPELINE_BUDGET_ARRAY_LIMIT = 3;
 
 export const PipelineReconSchema = Type.Object(
   {
-    text: Type.String({
-      description: "Text, logs, URL list, transcript, or indicators to investigate.",
-    }),
+    text: Type.Optional(Type.String({
+      description: "Canonical input: text, logs, URL list, transcript, or indicators to investigate.",
+    })),
+    target: Type.Optional(Type.String({
+      description: "Alias for text. Use this when the request is phrased as a target URL, domain, actor, or indicator list.",
+    })),
     effort: Type.Union([Type.Literal("light"), Type.Literal("medium"), Type.Literal("high")], {
       description: "Recon effort: light extracts only, medium adds URL and domain lookups, high runs the broader bounded safe suite.",
     }),
@@ -55,7 +58,15 @@ export async function pipelineReconForTool(
   params: PipelineReconParams & { signal?: AbortSignal; cache?: OsintCache; skipHighExpansion?: boolean },
 ) {
   const maxLookups = Math.min(Math.max(params.maxLookups ?? DEFAULT_MAX_LOOKUPS, 1), MAX_LOOKUPS);
-  const indicators = extractIndicatorsForTool({ text: params.text });
+  const text = normalizePipelineInput(params);
+  if (!text) {
+    return {
+      ok: false,
+      source: "osint-pipeline",
+      error: "Expected text or target input for OSINT pipeline recon.",
+    };
+  }
+  const indicators = extractIndicatorsForTool({ text });
   const stages = ["extract_indicators"];
   if (params.effort === "light") {
     return {
@@ -218,7 +229,14 @@ export async function pipelineReconForTool(
       stages,
       indicators,
       limits: { maxLookups },
-      keyFindings: buildPipelineKeyFindings({ businessReputationSummary }),
+      keyFindings: buildPipelineKeyFindings({
+        businessReputationSummary,
+        execution: {
+          phoneReputationRan: phones.length > 0,
+          phoneReputationInputCount: phones.length,
+          outputTruncationMarkerPresent: false,
+        },
+      }),
       results: {
         urlSnapshots,
         domainNetwork,
@@ -251,6 +269,11 @@ export async function pipelineReconForTool(
       cache.close();
     }
   }
+}
+
+function normalizePipelineInput(params: Pick<PipelineReconParams, "text" | "target">): string | undefined {
+  const text = params.text?.trim() || params.target?.trim();
+  return text || undefined;
 }
 
 function businessNamesFromWhoisEvidence(...sources: readonly unknown[]): string[] {
@@ -343,7 +366,7 @@ function mergeDerivedIndicators(
 function fitPipelineOutputBudget<T extends { results?: Record<string, unknown>; limits?: Record<string, unknown> }>(
   result: T,
 ): T {
-  const originalChars = JSON.stringify(result).length;
+  const originalChars = measurePipelineOutputChars(result);
   if (originalChars <= PIPELINE_OUTPUT_TARGET_CHARS || !result.results) {
     return result;
   }
@@ -351,13 +374,15 @@ function fitPipelineOutputBudget<T extends { results?: Record<string, unknown>; 
     ...result,
     limits: {
       ...result.limits,
+      outputMode: "compacted",
       outputCompacted: true,
       outputTargetChars: PIPELINE_OUTPUT_TARGET_CHARS,
+      outputTruncationMarkerPresent: false,
       originalChars,
     },
     results: compactPipelineResultsForBudget(result.results),
   };
-  const compactedChars = JSON.stringify(compacted).length;
+  const compactedChars = measurePipelineOutputChars(compacted);
   if (compactedChars <= PIPELINE_OUTPUT_TARGET_CHARS) {
     return {
       ...compacted,
@@ -372,6 +397,7 @@ function fitPipelineOutputBudget<T extends { results?: Record<string, unknown>; 
     limits: {
       ...compacted.limits,
       compactedChars,
+      outputMode: "summary_only",
       summaryOnly: true,
     },
     results: summarizePipelineResultsForBudget(result.results),
@@ -380,9 +406,13 @@ function fitPipelineOutputBudget<T extends { results?: Record<string, unknown>; 
     ...summaryOnly,
     limits: {
       ...summaryOnly.limits,
-      summaryChars: JSON.stringify(summaryOnly).length,
+      summaryChars: measurePipelineOutputChars(summaryOnly),
     },
   } as T;
+}
+
+function measurePipelineOutputChars(value: unknown): number {
+  return JSON.stringify(value, null, 2).length;
 }
 
 function compactPipelineResultsForBudget(results: Record<string, unknown>): Record<string, unknown> {
@@ -714,7 +744,10 @@ function summarizeBusinessReputationResults(results: readonly unknown[]): unknow
   });
 }
 
-function buildPipelineKeyFindings(params: { businessReputationSummary: readonly unknown[] }) {
+function buildPipelineKeyFindings(params: {
+  businessReputationSummary: readonly unknown[];
+  execution?: Record<string, unknown>;
+}) {
   const businessCoverage = params.businessReputationSummary.flatMap((entry) => {
     if (!entry || typeof entry !== "object") {
       return [];
@@ -735,6 +768,7 @@ function buildPipelineKeyFindings(params: { businessReputationSummary: readonly 
     }];
   });
   return {
+    ...(params.execution ? { execution: params.execution } : {}),
     businessCoverage,
   };
 }
@@ -918,4 +952,5 @@ function compactTlsCertificateResult(result: unknown): unknown {
 
 export const testing = {
   fitPipelineOutputBudget,
+  measurePipelineOutputChars,
 };

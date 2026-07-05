@@ -54,6 +54,27 @@ describe("openclaw osint tools", () => {
     assert.deepEqual(result.results, {});
   });
 
+  it("accepts target as a pipeline input alias", async () => {
+    const result = await pipelineReconForTool({
+      effort: "light",
+      target: "https://example.com alias@example.com",
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.indicators.urls, ["https://example.com"]);
+    assert.deepEqual(result.indicators.emails, ["alias@example.com"]);
+  });
+
+  it("returns a structured pipeline error when no input is supplied", async () => {
+    const result = await pipelineReconForTool({
+      effort: "light",
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.source, "osint-pipeline");
+    assert.match(result.error, /Expected text or target/);
+  });
+
   it("runs medium pipeline recon without high-effort lookups", async () => {
     const result = await pipelineReconForTool({
       effort: "medium",
@@ -150,6 +171,8 @@ describe("openclaw osint tools", () => {
       assert.equal(result.results.cdnDdosProtection.length, 1);
       assert.equal(result.results.businessReputationSummary.length, 1);
       assert.equal(Array.isArray(result.keyFindings.businessCoverage), true);
+      assert.equal(result.keyFindings.execution.phoneReputationRan, false);
+      assert.equal(result.keyFindings.execution.outputTruncationMarkerPresent, false);
       assert.equal(result.results.businessReputation.length, 1);
       assert.equal(["Cloudflare, Inc.", "EDGECAST"].includes(result.results.businessReputation[0].business), true);
       assert.equal("bbbSearch" in result.results.businessReputation[0], false);
@@ -191,8 +214,11 @@ describe("openclaw osint tools", () => {
     const serialized = JSON.stringify(result);
 
     assert.equal(result.limits.outputCompacted, true);
+    assert.equal(["compacted", "summary_only"].includes(result.limits.outputMode), true);
+    assert.equal(result.limits.outputTruncationMarkerPresent, false);
     assert.equal(serialized.includes("noisy page noisy page"), false);
     assert.equal(serialized.length < result.limits.originalChars, true);
+    assert.equal(pipelineTesting.measurePipelineOutputChars(result) <= result.limits.outputTargetChars, true);
     assert.doesNotThrow(() => JSON.parse(serialized));
   });
 
