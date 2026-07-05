@@ -275,6 +275,15 @@ describe("openclaw osint tools", () => {
       "DNS:example.com",
       "DNS:www.example.com",
     ]);
+    assert.deepEqual(tlsCertificateTesting.parseAltNames([
+      "DNS:*.example.com",
+      "DNS:api.example.com",
+      "IP Address:8.8.8.8",
+      "IP Address:10.0.0.1",
+    ]), {
+      dnsNames: ["example.com", "api.example.com"],
+      ipAddresses: ["8.8.8.8"],
+    });
   });
 
   it("keeps traceroute as an operator-side plan", () => {

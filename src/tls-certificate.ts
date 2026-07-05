@@ -8,6 +8,7 @@ const DEFAULT_PORT = 443;
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_TIMEOUT_MS = 15_000;
 const MAX_CHAIN_DEPTH = 10;
+const MAX_DERIVED_HOSTS = 50;
 
 export const TlsCertificateChainSchema = Type.Object(
   {
@@ -59,6 +60,7 @@ export async function queryTlsCertificateChainForTool(params: TlsCertificateChai
       cipher: result.cipher,
       resolvedAddresses,
       chain: result.chain,
+      derivedIndicators: deriveIndicatorsFromChain(result.chain),
       operatorCommand: `openssl s_client -connect ${host}:${port} -servername ${host} -showcerts </dev/null`,
       caveat:
         "Certificate metadata is observed from this machine's network path. The operator command is a reproduction hint and is not executed by the plugin.",
@@ -145,11 +147,14 @@ function collectCertificateChain(certificate: PeerCertificate) {
 }
 
 function formatCertificate(certificate: PeerCertificate, depth: number) {
+  const subjectAltNames = parseSubjectAltNames(certificate.subjectaltname);
   return {
     depth,
     subject: compactNameObject(certificate.subject),
     issuer: compactNameObject(certificate.issuer),
-    subjectAltNames: parseSubjectAltNames(certificate.subjectaltname),
+    subjectAltName: certificate.subjectaltname,
+    subjectAltNames,
+    altNames: parseAltNames(subjectAltNames),
     validFrom: certificate.valid_from,
     validTo: certificate.valid_to,
     serialNumber: certificate.serialNumber,
@@ -165,6 +170,40 @@ function parseSubjectAltNames(value?: string): string[] {
     return [];
   }
   return value.split(/,\s*/g).map((entry) => entry.trim()).filter(Boolean).slice(0, 50);
+}
+
+function parseAltNames(subjectAltNames: readonly string[]) {
+  const dnsNames = [];
+  const ipAddresses = [];
+  for (const entry of subjectAltNames) {
+    const [kind, ...valueParts] = entry.split(":");
+    const value = valueParts.join(":").trim().toLowerCase().replace(/^\*\./, "");
+    if (!value) {
+      continue;
+    }
+    if (kind === "DNS" && normalizePublicHost(value)) {
+      dnsNames.push(value);
+    } else if (kind === "IP Address" && isIP(value) && !isBlockedIp(value)) {
+      ipAddresses.push(value);
+    }
+  }
+  return {
+    dnsNames: uniqueBounded(dnsNames, MAX_DERIVED_HOSTS),
+    ipAddresses: uniqueBounded(ipAddresses, MAX_DERIVED_HOSTS),
+  };
+}
+
+function deriveIndicatorsFromChain(chain: ReturnType<typeof collectCertificateChain>) {
+  return {
+    hosts: uniqueBounded(
+      chain.flatMap((certificate) => certificate.altNames.dnsNames),
+      MAX_DERIVED_HOSTS,
+    ),
+    ipAddresses: uniqueBounded(
+      chain.flatMap((certificate) => certificate.altNames.ipAddresses),
+      MAX_DERIVED_HOSTS,
+    ),
+  };
 }
 
 function compactNameObject(value: unknown): Record<string, string> {
@@ -245,6 +284,10 @@ function ipv4ToNumber(address: string): number {
   return address.split(".").reduce((value, part) => ((value << 8) + Number(part)) >>> 0, 0);
 }
 
+function uniqueBounded(values: readonly string[], limit: number): string[] {
+  return Array.from(new Set(values.filter(Boolean))).slice(0, limit);
+}
+
 function sha256Hex(value?: Buffer): string | undefined {
   return value ? createHash("sha256").update(value).digest("hex") : undefined;
 }
@@ -258,5 +301,6 @@ export const testing = {
   isBlockedIpv4,
   isBlockedIpv6,
   normalizePublicHost,
+  parseAltNames,
   parseSubjectAltNames,
 };

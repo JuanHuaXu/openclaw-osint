@@ -202,6 +202,7 @@ Sources and behavior:
 - connects with SNI using Node's TLS stack
 - blocks localhost, internal hostnames, and private/special-use resolved IPs before connecting
 - returns certificate subject, issuer, SANs, validity window, serial, fingerprints, and raw SHA-256 per chain entry
+- returns normalized `altNames` and certificate-derived host/IP indicators from SANs
 - returns TLS protocol and cipher metadata
 - includes an `openssl s_client -showcerts` operator command for reproduction
 - does not execute `openssl` or shell commands itself
@@ -337,7 +338,7 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.10.1.tgz
+openclaw plugins install ./openclaw-osint-0.10.2.tgz
 ```
 
 Restart the OpenClaw gateway after install.

@@ -101,12 +101,12 @@ export async function pipelineReconForTool(
       ),
     );
     const ipAssignments = ipAssignmentsFull.map(compactIpAssignmentResult);
-    const derivedIndicators = mergeDerivedIndicators(
+    const contactIndicators = mergeDerivedIndicators(
       derivedIndicatorsFromAuthorityResults(domainAuthorityFull),
       derivedIndicatorsFromAuthorityResults(ipAssignmentsFull),
     );
-    const emails = uniqueBounded([...indicators.emails, ...derivedIndicators.emails], maxLookups);
-    const phones = uniqueBounded(derivedIndicators.phones, maxLookups);
+    const emails = uniqueBounded([...indicators.emails, ...contactIndicators.emails], maxLookups);
+    const phones = uniqueBounded(contactIndicators.phones, maxLookups);
     const hashes = indicators.hashes.slice(0, maxLookups);
     const [tlsCertificates, infraReputation, hibpEmails, phoneReputation, pwnedHashes] = await Promise.all([
       Promise.all(
@@ -141,6 +141,10 @@ export async function pipelineReconForTool(
         ),
       ),
     ]);
+    const derivedIndicators = mergeDerivedIndicators(
+      contactIndicators,
+      derivedIndicatorsFromTlsResults(tlsCertificates),
+    );
     stages.push("domain_authority_intel", "ip_assignment_intel", "tls_certificate_chain", "infra_reputation", "hibp_email_breach", "phone_reputation", "pwned_password_hash");
     return {
       ok: true,
@@ -209,10 +213,27 @@ function mergeDerivedIndicators(...items: Array<{ emails: readonly string[]; pho
   return {
     emails: uniqueBounded(items.flatMap((item) => item.emails), MAX_LOOKUPS),
     phones: uniqueBounded(items.flatMap((item) => item.phones), MAX_LOOKUPS),
+    hosts: uniqueBounded(items.flatMap((item) => optionalStringArray(item, "hosts")), MAX_LOOKUPS),
+    ipAddresses: uniqueBounded(items.flatMap((item) => optionalStringArray(item, "ipAddresses")), MAX_LOOKUPS),
   };
 }
 
-function indicatorValues(result: unknown, key: "emails" | "phones"): string[] {
+function derivedIndicatorsFromTlsResults(results: readonly unknown[]) {
+  return {
+    emails: [],
+    phones: [],
+    hosts: uniqueBounded(
+      results.flatMap((result) => indicatorValues(result, "hosts")),
+      MAX_LOOKUPS,
+    ),
+    ipAddresses: uniqueBounded(
+      results.flatMap((result) => indicatorValues(result, "ipAddresses")),
+      MAX_LOOKUPS,
+    ),
+  };
+}
+
+function indicatorValues(result: unknown, key: "emails" | "phones" | "hosts" | "ipAddresses"): string[] {
   if (!result || typeof result !== "object" || !("derivedIndicators" in result)) {
     return [];
   }
@@ -222,6 +243,14 @@ function indicatorValues(result: unknown, key: "emails" | "phones"): string[] {
     return [];
   }
   return values.filter((value): value is string => typeof value === "string");
+}
+
+function optionalStringArray(value: unknown, key: string): string[] {
+  if (!value || typeof value !== "object" || !(key in value)) {
+    return [];
+  }
+  const array = (value as Record<string, unknown>)[key];
+  return Array.isArray(array) ? array.filter((item): item is string => typeof item === "string") : [];
 }
 
 function compactDomainAuthorityResult(result: unknown): unknown {
