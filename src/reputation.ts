@@ -11,6 +11,58 @@ const ABUSEIPDB_TIMEOUT_MS = 12_000;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const FTC_TTL_MS = 6 * 60 * 60 * 1000;
 const SPAMHAUS_TTL_MS = 12 * 60 * 60 * 1000;
+const PHONE_FRAUD_REPORT_SOURCES = [
+  "scamcallfighters.com",
+  "signal-arnaques.com",
+] as const;
+const DISPOSABLE_PHONE_FOOTPRINT_SOURCES = [
+  "receive-sms-online.com",
+  "receive-sms-now.com",
+  "freesmsverification.com",
+  "freeonlinephone.org",
+  "sms-receive.net",
+  "smsreceivefree.com",
+  "receive-a-sms.com",
+  "receivefreesms.com",
+  "freephonenum.com",
+  "receive-smss.com",
+  "receivetxt.com",
+  "receive-sms.com",
+  "receivesmsonline.net",
+  "pinger.com",
+  "textnow.com",
+  "k7.net",
+  "kall8.com",
+  "faxaway.com",
+  "receivesmsonline.com",
+  "receive-sms-online.info",
+  "sellaite.com",
+  "getfreesmsnumber.com",
+  "smsreceiving.com",
+  "smstibo.com",
+  "catchsms.com",
+  "freesmscode.com",
+  "smsreceiveonline.com",
+  "smslisten.com",
+  "sms.sellaite.com",
+] as const;
+const BLOCKED_PERSON_SEARCH_SOURCES = [
+  "facebook.com",
+  "truepeoplesearch.com",
+  "fastpeoplesearch.com",
+  "pipl.com",
+  "spytox.com",
+  "411.com",
+  "thatsthem.com",
+  "truecaller.com",
+  "sync.me",
+  "whocallsme.com",
+  "zabasearch.com",
+  "dexknows.com",
+  "okcaller.com",
+  "searchbug.com",
+  "numinfo.net",
+] as const;
 
 export const PhoneReputationSchema = Type.Object(
   {
@@ -85,6 +137,14 @@ type SourceStatus = {
   source: string;
   status: "checked" | "missing_key" | "not_applicable" | "error";
   detail?: string;
+};
+
+type PhoneSourceLead = {
+  source: string;
+  category: "fraud_report" | "disposable_or_voip_footprint" | "person_search_blocked";
+  automation: "manual_search_lead" | "blocked";
+  purpose: string;
+  queryHints?: string[];
 };
 
 export async function queryPhoneReputationForTool(
@@ -441,6 +501,7 @@ function formatPhoneResult(
     robocallCount,
     confidence: complaints.length === 0 ? 0.1 : Math.min(0.75, 0.35 + complaints.length * 0.03),
     ownerClassHint: complaints.length > 0 ? "service_or_spam_infra_possible" : "unknown_owner",
+    sourceLeads: buildPhoneOsintSourceLeads(phone),
     complaints: complaints.slice(0, 10).map((complaint) => ({
       id: complaint.id,
       createdDate: complaint.createdDate,
@@ -449,8 +510,35 @@ function formatPhoneResult(
       robocall: complaint.robocall,
     })),
     caveat:
-      "FTC reports are consumer complaints and are not verified; phone numbers may be spoofed or reassigned.",
+      "FTC reports and source leads are reputation evidence, not identity proof; phone numbers may be spoofed or reassigned.",
   };
+}
+
+function buildPhoneOsintSourceLeads(phone: { e164: string; national: string }): PhoneSourceLead[] {
+  const local = `(${phone.national.slice(0, 3)}) ${phone.national.slice(3, 6)}-${phone.national.slice(6)}`;
+  const queryHints = [phone.e164, phone.national, local];
+  return [
+    ...PHONE_FRAUD_REPORT_SOURCES.map((source) => ({
+      source,
+      category: "fraud_report" as const,
+      automation: "manual_search_lead" as const,
+      purpose: "Check public unwanted-call or phone-fraud reports for spam/service reputation only.",
+      queryHints,
+    })),
+    ...DISPOSABLE_PHONE_FOOTPRINT_SOURCES.map((source) => ({
+      source,
+      category: "disposable_or_voip_footprint" as const,
+      automation: "manual_search_lead" as const,
+      purpose: "Check whether the number appears on public disposable SMS, VoIP, or temporary-number pages.",
+      queryHints: queryHints.map((value) => `site:${source} "${value}"`),
+    })),
+    ...BLOCKED_PERSON_SEARCH_SOURCES.map((source) => ({
+      source,
+      category: "person_search_blocked" as const,
+      automation: "blocked" as const,
+      purpose: "Person-search and address-broker lookup is intentionally not automated by this plugin.",
+    })),
+  ];
 }
 
 function parseFtcComplaints(rawJson: string): FtcComplaint[] {
@@ -579,6 +667,7 @@ function formatError(error: unknown): string {
 
 export const testing = {
   assessBotIdentityForTool,
+  buildPhoneOsintSourceLeads,
   findContainingCidr,
   normalizeIpv4,
   normalizeUsPhone,

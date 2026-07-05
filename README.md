@@ -98,10 +98,12 @@ Requirements and behavior:
 
 - works without API keys for local US phone normalization
 - adds FTC complaint evidence when `FTC_API_KEY` is configured
+- returns categorized source leads for public fraud-report and disposable/VoIP footprint checks
+- marks person-search and address-broker sources as blocked automation
 - supports US numbers only
 - fetches a bounded recent area-code sample and matches the number locally
 - returns complaint count, robocall count, subjects, dates, and caveats
-- treats FTC reports as unverified reputation evidence, not owner identity
+- treats FTC reports and source leads as unverified reputation evidence, not owner identity
 
 ### `osint_infra_reputation`
 
@@ -149,7 +151,7 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.5.1.tgz
+openclaw plugins install ./openclaw-osint-0.5.2.tgz
 ```
 
 Restart the OpenClaw gateway after install.

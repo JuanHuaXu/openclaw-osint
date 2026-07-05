@@ -295,6 +295,18 @@ describe("openclaw osint tools", () => {
       assert.equal(result.phone, "+12025550123");
       assert.equal(result.complaintCount, 0);
       assert.equal(
+        result.sourceLeads.some(
+          (lead) => lead.source === "textnow.com" && lead.category === "disposable_or_voip_footprint",
+        ),
+        true,
+      );
+      assert.equal(
+        result.sourceLeads.some(
+          (lead) => lead.source === "truecaller.com" && lead.automation === "blocked",
+        ),
+        true,
+      );
+      assert.equal(
         result.sourceStatuses.some(
           (source) => source.source === "ftc-dnc" && source.status === "missing_key",
         ),
@@ -307,6 +319,22 @@ describe("openclaw osint tools", () => {
         process.env.FTC_API_KEY = oldKey;
       }
     }
+  });
+
+  it("builds bot-reputation phone source leads without automating person search", () => {
+    const leads = reputationTesting.buildPhoneOsintSourceLeads({
+      e164: "+12025550123",
+      national: "2025550123",
+    });
+
+    assert.equal(leads.some((lead) => lead.source === "scamcallfighters.com"), true);
+    assert.equal(leads.some((lead) => lead.source === "receive-sms-online.com"), true);
+    assert.equal(
+      leads
+        .filter((lead) => lead.category === "person_search_blocked")
+        .every((lead) => lead.automation === "blocked"),
+      true,
+    );
   });
 
   it("parses FTC complaint records without treating reports as verified identity", () => {
