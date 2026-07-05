@@ -6,6 +6,7 @@ import { OsintCache, type OsintObservation } from "./cache.js";
 const BUSINESS_REPUTATION_SOURCE = "business-reputation";
 const FTC_RELEASE_NOTICES_SOURCE = "ftc-release-notices";
 const BBB_SEARCH_SOURCE = "bbb-business-search";
+const WIKIDATA_RELATED_BUSINESSES_SOURCE = "wikidata-related-businesses";
 const SEC_COMPANY_TICKERS_SOURCE = "sec-company-tickers";
 const SEC_SUBMISSIONS_SOURCE = "sec-submissions";
 const MARKET_FINANCIALS_SOURCE = "market-financials";
@@ -26,6 +27,9 @@ const MAX_RESPONSE_BYTES = 1024 * 1024;
 const SEC_COMPANY_FACTS_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 const DEFAULT_MAX_RESULTS = 5;
 const MAX_RESULTS = 10;
+const MAX_RELATED_BUSINESS_TARGETS = 5;
+const MAX_RELATED_BBB_SEARCHES = 4;
+const COMMON_SECOND_LEVEL_SUFFIXES = new Set(["ac", "co", "com", "edu", "gov", "net", "org"]);
 
 export const BusinessReputationLookupSchema = Type.Object(
   {
@@ -95,7 +99,8 @@ export async function queryBusinessReputationForTool(
     }
 
     const fetchedAt = Date.now();
-    const [ftcReleaseNotices, bbbSearch, financialDisclosures, marketFinancials, regionalDisclosures] = await Promise.all([
+    const relatedBusinessTargets = buildRelatedBusinessTargets(business, domain);
+    const [ftcReleaseNotices, bbbSearch, financialDisclosures, marketFinancials, regionalDisclosures, wikidataRelatedBusinesses] = await Promise.all([
       queryFtcReleaseNotices(business, maxResults, params.signal),
       queryBbbBusinessSearch({ business, domain, maxResults, signal: params.signal }),
       querySecFinancialDisclosures({
@@ -121,7 +126,33 @@ export async function queryBusinessReputationForTool(
         maxResults,
         signal: params.signal,
       }),
+      queryWikidataRelatedBusinesses(relatedBusinessTargets, maxResults, params.signal),
     ]);
+    const relatedBbbTargets = relatedBusinessTargets
+      .filter((target) => target.business !== business)
+      .concat(
+        wikidataRelatedBusinesses.ok === true && Array.isArray(wikidataRelatedBusinesses.results)
+          ? wikidataRelatedBusinesses.results.map((result) => ({
+            business: result.business,
+            basis: `wikidata_${result.relation}`,
+          }))
+          : [],
+      )
+      .filter((target, index, targets) =>
+        targets.findIndex((candidate) => candidate.business.toLowerCase() === target.business.toLowerCase()) === index
+      )
+      .slice(0, MAX_RELATED_BBB_SEARCHES);
+    const relatedBbbSearches = await Promise.all(
+      relatedBbbTargets.map(async (target) => ({
+        ...target,
+        bbbSearch: await queryBbbBusinessSearch({
+          business: target.business,
+          domain,
+          maxResults: Math.min(maxResults, 3),
+          signal: params.signal,
+        }),
+      })),
+    );
     const professionalProfileLeads = buildProfessionalProfileLeads(business, domain);
     const workplaceReviewLeads = buildWorkplaceReviewLeads(business, domain);
     const searchLeads = buildSearchLeads(business, domain);
@@ -137,6 +168,9 @@ export async function queryBusinessReputationForTool(
       expiresAt: fetchedAt + BUSINESS_REPUTATION_TTL_MS,
       ftcReleaseNotices,
       bbbSearch,
+      relatedBusinessTargets,
+      wikidataRelatedBusinesses,
+      relatedBbbSearches,
       professionalProfileLeads,
       workplaceReviewLeads,
       financialDisclosures,
@@ -146,6 +180,7 @@ export async function queryBusinessReputationForTool(
       sourceStatuses: [
         sourceStatusFromResult(FTC_RELEASE_NOTICES_SOURCE, ftcReleaseNotices),
         sourceStatusFromResult(BBB_SEARCH_SOURCE, bbbSearch),
+        sourceStatusFromResult(WIKIDATA_RELATED_BUSINESSES_SOURCE, wikidataRelatedBusinesses),
         sourceStatusFromResult(SEC_SUBMISSIONS_SOURCE, financialDisclosures),
         sourceStatusFromResult(MARKET_FINANCIALS_SOURCE, marketFinancials),
         sourceStatusFromResult(UK_COMPANIES_HOUSE_SOURCE, regionalDisclosures.ukCompaniesHouse),
@@ -266,6 +301,136 @@ async function queryBbbBusinessSearch(params: {
     }
   } catch (error) {
     return { ok: false, source: BBB_SEARCH_SOURCE, url, error: formatError(error) };
+  }
+}
+
+async function queryWikidataRelatedBusinesses(
+  targets: Array<{ business: string; basis: string }>,
+  maxResults: number,
+  signal?: AbortSignal,
+) {
+  try {
+    for (const target of targets) {
+      const entity = await searchWikidataBusinessEntity(target.business, signal);
+      if (!entity) {
+        continue;
+      }
+      const entityData = await fetchWikidataEntity(entity.id, signal);
+      const relatedIds = wikidataRelatedIdsFromEntity(entityData);
+      if (relatedIds.length === 0) {
+        return {
+          ok: true,
+          source: WIKIDATA_RELATED_BUSINESSES_SOURCE,
+          matched: entity,
+          results: [],
+        };
+      }
+      const labels = await fetchWikidataEntityLabels(relatedIds.slice(0, maxResults), signal);
+      return {
+        ok: true,
+        source: WIKIDATA_RELATED_BUSINESSES_SOURCE,
+        matched: entity,
+        results: labels.map((label) => ({
+          business: label.label,
+          relation: relatedIds.find((related) => related.id === label.id)?.relation ?? "related",
+          wikidataId: label.id,
+        })),
+      };
+    }
+    return {
+      ok: false,
+      source: WIKIDATA_RELATED_BUSINESSES_SOURCE,
+      status: "not_found",
+      error: "No matching Wikidata business entity found for related-company expansion.",
+    };
+  } catch (error) {
+    return { ok: false, source: WIKIDATA_RELATED_BUSINESSES_SOURCE, error: formatError(error) };
+  }
+}
+
+async function searchWikidataBusinessEntity(business: string, signal?: AbortSignal) {
+  const url = wikidataSearchUrl(business);
+  const guarded = await fetchWithSsrFGuard({
+    url,
+    init: {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; OpenClaw OSINT; +https://openclaw.ai)",
+      },
+    },
+    timeoutMs: LOOKUP_TIMEOUT_MS,
+    signal,
+    auditContext: "openclaw-osint-wikidata-search",
+  });
+  const { response, release } = guarded;
+  try {
+    if (!response.ok) {
+      throw new Error(`Wikidata search returned HTTP ${response.status}`);
+    }
+    const parsed = JSON.parse(await readResponseTextBounded(response, MAX_RESPONSE_BYTES));
+    const row = Array.isArray(parsed?.search) ? parsed.search[0] : undefined;
+    const id = typeof row?.id === "string" ? row.id : undefined;
+    const label = typeof row?.label === "string" ? row.label : undefined;
+    return id && label ? { id, label, business } : undefined;
+  } finally {
+    await release();
+  }
+}
+
+async function fetchWikidataEntity(id: string, signal?: AbortSignal) {
+  const guarded = await fetchWithSsrFGuard({
+    url: `https://www.wikidata.org/wiki/Special:EntityData/${encodeURIComponent(id)}.json`,
+    init: {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; OpenClaw OSINT; +https://openclaw.ai)",
+      },
+    },
+    timeoutMs: LOOKUP_TIMEOUT_MS,
+    signal,
+    auditContext: "openclaw-osint-wikidata-entity",
+  });
+  const { response, release } = guarded;
+  try {
+    if (!response.ok) {
+      throw new Error(`Wikidata entity returned HTTP ${response.status}`);
+    }
+    return JSON.parse(await readResponseTextBounded(response, MAX_RESPONSE_BYTES));
+  } finally {
+    await release();
+  }
+}
+
+async function fetchWikidataEntityLabels(ids: Array<{ id: string; relation: string }>, signal?: AbortSignal) {
+  if (ids.length === 0) {
+    return [];
+  }
+  const url = new URL("https://www.wikidata.org/w/api.php");
+  url.searchParams.set("action", "wbgetentities");
+  url.searchParams.set("ids", ids.map((item) => item.id).join("|"));
+  url.searchParams.set("props", "labels");
+  url.searchParams.set("languages", "en");
+  url.searchParams.set("format", "json");
+  const guarded = await fetchWithSsrFGuard({
+    url: url.toString(),
+    init: {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; OpenClaw OSINT; +https://openclaw.ai)",
+      },
+    },
+    timeoutMs: LOOKUP_TIMEOUT_MS,
+    signal,
+    auditContext: "openclaw-osint-wikidata-labels",
+  });
+  const { response, release } = guarded;
+  try {
+    if (!response.ok) {
+      throw new Error(`Wikidata labels returned HTTP ${response.status}`);
+    }
+    return normalizeWikidataLabels(JSON.parse(await readResponseTextBounded(response, MAX_RESPONSE_BYTES)));
+  } finally {
+    await release();
   }
 }
 
@@ -615,6 +780,27 @@ function buildSearchLeads(business: string, domain?: string) {
   ];
 }
 
+function buildRelatedBusinessTargets(business: string, domain?: string) {
+  const targets: Array<{ business: string; basis: string }> = [];
+  const add = (value: string | undefined, basis: string) => {
+    const normalized = value ? normalizeBusinessName(value) : undefined;
+    if (!normalized || targets.some((target) => target.business.toLowerCase() === normalized.toLowerCase())) {
+      return;
+    }
+    targets.push({ business: normalized, basis });
+  };
+
+  add(business, "input");
+  const stripped = stripBusinessDesignators(business);
+  add(stripped, "legal_designator_stripped");
+  add(domainBusinessName(domain), "domain_brand");
+  if (stripped && stripped !== business && !/\b(?:inc|llc|ltd|limited|corp|corporation|company)\b/i.test(stripped)) {
+    add(`${stripped} Inc.`, "legal_variant");
+  }
+
+  return targets.slice(0, MAX_RELATED_BUSINESS_TARGETS);
+}
+
 function buildProfessionalProfileLeads(business: string, domain?: string) {
   const query = domain ? `${business} ${domain}` : business;
   return [
@@ -706,6 +892,23 @@ function observationsFromBusinessLookup(target: string, result: Awaited<ReturnTy
       sourceRef: profile.url,
     });
   }
+  for (const related of Array.isArray(result.relatedBbbSearches) ? result.relatedBbbSearches : []) {
+    for (const profile of related.bbbSearch.ok === true ? related.bbbSearch.profileLeads : []) {
+      observations.push({
+        id: stableObservationId(BUSINESS_REPUTATION_SOURCE, target, "related_bbb_profile_lead", `${related.business}\0${profile.url}`),
+        source: BUSINESS_REPUTATION_SOURCE,
+        target,
+        type: "related_bbb_profile_lead",
+        value: profile.url,
+        confidence: 0.58,
+        admissionScore: 0.52,
+        storageTier: "thin",
+        observedAt,
+        sourceRef: profile.url,
+        metadata: { business: related.business, basis: related.basis },
+      });
+    }
+  }
   for (const filing of result.financialDisclosures.ok === true ? result.financialDisclosures.recentFilings : []) {
     observations.push({
       id: stableObservationId(BUSINESS_REPUTATION_SOURCE, target, "sec_filing", filing.accessionNumber),
@@ -786,6 +989,16 @@ function bbbSearchUrl(business: string, domain?: string): string {
   const url = new URL("https://www.bbb.org/search");
   url.searchParams.set("find_text", business);
   url.searchParams.set("find_country", "USA");
+  return url.toString();
+}
+
+function wikidataSearchUrl(business: string): string {
+  const url = new URL("https://www.wikidata.org/w/api.php");
+  url.searchParams.set("action", "wbsearchentities");
+  url.searchParams.set("search", business);
+  url.searchParams.set("language", "en");
+  url.searchParams.set("format", "json");
+  url.searchParams.set("limit", "1");
   return url.toString();
 }
 
@@ -1459,6 +1672,71 @@ function parseBbbProfileLinks(html: string, limit: number) {
   ).slice(0, limit).map((url) => ({ url }));
 }
 
+function wikidataRelatedIdsFromEntity(parsed: unknown): Array<{ id: string; relation: string }> {
+  const entity = firstWikidataEntity(parsed);
+  const claims = entity && typeof entity === "object" && "claims" in entity && entity.claims && typeof entity.claims === "object"
+    ? entity.claims as Record<string, unknown>
+    : {};
+  return uniqueWikidataIds([
+    ...wikidataClaimEntityIds(claims.P355, "subsidiary"),
+    ...wikidataClaimEntityIds(claims.P749, "parent"),
+    ...wikidataClaimEntityIds(claims.P127, "owner"),
+  ]);
+}
+
+function wikidataClaimEntityIds(value: unknown, relation: string): Array<{ id: string; relation: string }> {
+  const rows = Array.isArray(value) ? value : [];
+  return rows.flatMap((row) => {
+    const id = row && typeof row === "object"
+      && "mainsnak" in row
+      && row.mainsnak
+      && typeof row.mainsnak === "object"
+      && "datavalue" in row.mainsnak
+      && row.mainsnak.datavalue
+      && typeof row.mainsnak.datavalue === "object"
+      && "value" in row.mainsnak.datavalue
+      && row.mainsnak.datavalue.value
+      && typeof row.mainsnak.datavalue.value === "object"
+      && "id" in row.mainsnak.datavalue.value
+      && typeof row.mainsnak.datavalue.value.id === "string"
+      ? row.mainsnak.datavalue.value.id
+      : undefined;
+    return id ? [{ id, relation }] : [];
+  });
+}
+
+function normalizeWikidataLabels(parsed: unknown): Array<{ id: string; label: string }> {
+  const entities = parsed && typeof parsed === "object" && "entities" in parsed && parsed.entities && typeof parsed.entities === "object"
+    ? parsed.entities as Record<string, unknown>
+    : {};
+  return Object.entries(entities).flatMap(([id, entity]) => {
+    const label = entity
+        && typeof entity === "object"
+        && "labels" in entity
+        && entity.labels
+        && typeof entity.labels === "object"
+        && "en" in entity.labels
+        && entity.labels.en
+        && typeof entity.labels.en === "object"
+        && "value" in entity.labels.en
+        && typeof entity.labels.en.value === "string"
+      ? entity.labels.en.value.trim()
+      : "";
+    return label ? [{ id, label }] : [];
+  });
+}
+
+function firstWikidataEntity(parsed: unknown): unknown {
+  const entities = parsed && typeof parsed === "object" && "entities" in parsed && parsed.entities && typeof parsed.entities === "object"
+    ? Object.values(parsed.entities)
+    : [];
+  return entities[0];
+}
+
+function uniqueWikidataIds(items: Array<{ id: string; relation: string }>): Array<{ id: string; relation: string }> {
+  return items.filter((item, index) => items.findIndex((candidate) => candidate.id === item.id) === index);
+}
+
 function normalizeBusinessName(input: string): string | undefined {
   const cleaned = input.replace(/\s+/g, " ").trim();
   if (cleaned.length < 2 || cleaned.length > 160) {
@@ -1533,6 +1811,33 @@ function canonicalBusinessName(value: string): string {
     .trim();
 }
 
+function stripBusinessDesignators(value: string): string | undefined {
+  const stripped = value.replace(/\b(?:incorporated|inc|corp|corporation|co|company|llc|ltd|limited|plc|holdings?|group)\b\.?/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped && stripped !== value.trim() ? stripped : undefined;
+}
+
+function domainBusinessName(domain?: string): string | undefined {
+  if (!domain) {
+    return undefined;
+  }
+  const normalized = normalizeDomain(domain);
+  if (!normalized) {
+    return undefined;
+  }
+  const labels = normalized.split(".").filter(Boolean);
+  const label = labels.length > 2 && labels.at(-1)?.length === 2 && COMMON_SECOND_LEVEL_SUFFIXES.has(labels.at(-2) ?? "")
+    ? labels.at(-3)
+    : labels.length > 1
+    ? labels.at(-2)
+    : labels[0];
+  if (!label || label.length < 2) {
+    return undefined;
+  }
+  return label.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function slugifyBusinessName(value: string): string {
   return value.toLowerCase()
     .replace(/&/g, " and ")
@@ -1550,9 +1855,11 @@ export const testing = {
   buildEuBusinessRegisterLeads,
   buildJapanBusinessRegisterLeads,
   buildProfessionalProfileLeads,
+  buildRelatedBusinessTargets,
   buildWorkplaceReviewLeads,
   canonicalBusinessName,
   chinaGsxtSearchUrl,
+  domainBusinessName,
   ftcReleaseNoticeApiUrl,
   japanCorporateNumberSearchUrl,
   japanGbizInfoSearchUrl,
@@ -1568,9 +1875,12 @@ export const testing = {
   normalizeSecSubmissions,
   normalizeTaiwanGcisRows,
   normalizeYahooChartSnapshot,
+  normalizeWikidataLabels,
   parseJsonOrJsonp,
   parseBbbProfileLinks,
   taiwanFindbizUrl,
   taiwanGcisApiUrl,
+  wikidataRelatedIdsFromEntity,
+  wikidataSearchUrl,
   yahooChartUrl,
 };

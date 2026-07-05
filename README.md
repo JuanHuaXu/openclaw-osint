@@ -213,6 +213,8 @@ Sources and behavior:
 - queries the FTC release-notice JSON API by title when available
 - returns official FTC.gov and FTC legal-library search URLs for manual verification
 - queries the BBB public directory search page and extracts bounded BBB profile links when server-rendered links are present
+- also checks bounded related business targets from legal-name stripping and domain-brand context, so holding-company names do not collapse to a false “no BBB coverage” conclusion
+- uses bounded Wikidata parent/subsidiary/owner organization labels as related-company leads, then runs limited BBB searches for those names
 - returns LinkedIn company search and likely public company URL leads without credentialed scraping
 - returns Glassdoor company-review search leads without credentialed scraping
 - matches SEC EDGAR public-company records by ticker or normalized company name

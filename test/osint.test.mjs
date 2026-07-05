@@ -220,6 +220,35 @@ describe("openclaw osint tools", () => {
       businessTesting.buildWorkplaceReviewLeads("Example Corp", "example.com")[0].source,
       "glassdoor-company-search",
     );
+    assert.deepEqual(businessTesting.buildRelatedBusinessTargets("Yahoo Holdings Inc.", "www.yahoo.com"), [
+      { business: "Yahoo Holdings Inc.", basis: "input" },
+      { business: "Yahoo", basis: "legal_designator_stripped" },
+      { business: "Yahoo Inc.", basis: "legal_variant" },
+    ]);
+    assert.equal(businessTesting.domainBusinessName("service.example.co.uk"), "Example");
+    assert.equal(
+      new URL(businessTesting.wikidataSearchUrl("Yahoo Inc.")).searchParams.get("action"),
+      "wbsearchentities",
+    );
+    assert.deepEqual(businessTesting.wikidataRelatedIdsFromEntity({
+      entities: {
+        Q1: {
+          claims: {
+            P355: [{ mainsnak: { datavalue: { value: { id: "Q2" } } } }],
+            P749: [{ mainsnak: { datavalue: { value: { id: "Q3" } } } }],
+            P127: [{ mainsnak: { datavalue: { value: { id: "Q3" } } } }],
+          },
+        },
+      },
+    }), [
+      { id: "Q2", relation: "subsidiary" },
+      { id: "Q3", relation: "parent" },
+    ]);
+    assert.deepEqual(businessTesting.normalizeWikidataLabels({
+      entities: {
+        Q2: { labels: { en: { value: "Example Subsidiary" } } },
+      },
+    }), [{ id: "Q2", label: "Example Subsidiary" }]);
   });
 
   it("normalizes SEC company tickers and filing disclosure links", () => {
