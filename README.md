@@ -18,6 +18,7 @@ flowchart TD
   Plugin --> Voip["osint_voip_path_assess"]
   Plugin --> Infra["osint_infra_reputation"]
   Plugin --> IpRdap["osint_ip_assignment_intel"]
+  Plugin --> Tls["osint_tls_certificate_chain"]
   Plugin --> Bot["osint_bot_identity_assess"]
   Plugin --> Hibp["HIBP tools"]
   Plugin --> CacheStatus["osint_cache_status"]
@@ -37,6 +38,7 @@ flowchart TD
   Observed --> Bgp
   Infra --> Spamhaus["Spamhaus DROP"]
   Infra --> Abuse["AbuseIPDB if configured"]
+  Tls --> CertChain["TLS peer certificate chain"]
   Hibp --> HibpApi["Have I Been Pwned"]
 
   Crtsh --> Cache["SQLite OSINT cache"]
@@ -55,6 +57,7 @@ flowchart TD
 
   Network --> Evidence["Bounded reputation/context evidence"]
   Authority --> Evidence
+  Tls --> Evidence
   Authority --> Phone
   Authority --> Hibp
   Phone --> Evidence
@@ -85,6 +88,7 @@ flowchart TD
   Domains --> Certs["osint_crtsh_domain"]
   Domains --> Network["osint_domain_network_intel"]
   Domains --> Authority["osint_domain_authority_intel"]
+  Domains --> Tls["osint_tls_certificate_chain"]
   Ips --> Infra["osint_infra_reputation"]
   Ips --> IpRdap["osint_ip_assignment_intel"]
   Emails --> HibpEmail["osint_hibp_email_breach"]
@@ -107,7 +111,7 @@ Pipeline effort levels:
 
 - `light`: extract indicators only, no network lookups
 - `medium`: extract indicators, then enrich bounded URLs and domains
-- `high`: extract indicators, enrich URLs/domains, then correlate DNS-discovered IPs, RIR allocation records, and RDAP-derived emails/phones into reputation checks
+- `high`: extract indicators, enrich URLs/domains, then correlate TLS certificate chains, DNS-discovered IPs, RIR allocation records, and RDAP-derived emails/phones into reputation checks
 
 ## Tools
 
@@ -141,7 +145,7 @@ Runs bounded recon from raw text by effort level:
 
 - `light`: local indicator extraction only
 - `medium`: URL snapshots and domain network intel
-- `high`: medium plus authority DNS/RDAP, crt.sh, RIR IP assignment RDAP, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for RDAP-derived phone contacts, and pwned-password hash checks where indicators exist
+- `high`: medium plus TLS certificate chain inspection, authority DNS/RDAP, crt.sh, RIR IP assignment RDAP, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for RDAP-derived phone contacts, and pwned-password hash checks where indicators exist
 
 The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline. RDAP-derived contact indicators are reputation inputs only, not identity proof.
 
@@ -187,6 +191,19 @@ Sources and behavior:
 - returns bounded RDAP-derived emails and phone contacts as reputation indicators
 - caches bootstrap and allocation responses locally
 - does not identify subscribers, devices, or private human owners
+
+### `osint_tls_certificate_chain`
+
+Inspects a public TLS endpoint's presented certificate chain.
+
+Sources and behavior:
+
+- connects with SNI using Node's TLS stack
+- blocks localhost, internal hostnames, and private/special-use resolved IPs before connecting
+- returns certificate subject, issuer, SANs, validity window, serial, fingerprints, and raw SHA-256 per chain entry
+- returns TLS protocol and cipher metadata
+- includes an `openssl s_client -showcerts` operator command for reproduction
+- does not execute `openssl` or shell commands itself
 
 ### `osint_domain_authority_intel`
 
@@ -319,7 +336,7 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.9.0.tgz
+openclaw plugins install ./openclaw-osint-0.10.0.tgz
 ```
 
 Restart the OpenClaw gateway after install.

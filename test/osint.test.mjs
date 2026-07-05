@@ -11,6 +11,7 @@ import { testing as hibpTesting } from "../dist/src/hibp.js";
 import { testing as ipAssignmentTesting } from "../dist/src/ip-assignment.js";
 import { pipelineReconForTool } from "../dist/src/pipeline.js";
 import { testing as reputationTesting } from "../dist/src/reputation.js";
+import { testing as tlsCertificateTesting } from "../dist/src/tls-certificate.js";
 import { testing } from "../dist/src/tools.js";
 
 describe("openclaw osint tools", () => {
@@ -258,6 +259,19 @@ describe("openclaw osint tools", () => {
     assert.equal(ipAssignmentTesting.registryHintFromRdapUrl("https://rdap.apnic.net/ip/1.1.1.1"), "APNIC");
     assert.equal(ipAssignmentTesting.registryHintFromRdapUrl("https://rdap.db.ripe.net/ip/1.1.1.1"), "RIPE NCC");
     assert.equal(ipAssignmentTesting.registryHintFromRdapUrl("https://rdap.registro.br/ip/200.160.2.3"), "LACNIC/NIC.br");
+  });
+
+  it("guards TLS certificate lookup hosts and parses SANs", () => {
+    assert.equal(tlsCertificateTesting.normalizePublicHost("https://www.example.com/path"), "www.example.com");
+    assert.equal(tlsCertificateTesting.normalizePublicHost("localhost"), undefined);
+    assert.equal(tlsCertificateTesting.normalizePublicHost("127.0.0.1"), undefined);
+    assert.equal(tlsCertificateTesting.isBlockedIpv4("10.0.0.1"), true);
+    assert.equal(tlsCertificateTesting.isBlockedIpv4("8.8.8.8"), false);
+    assert.equal(tlsCertificateTesting.isBlockedIpv6("fc00::1"), true);
+    assert.deepEqual(tlsCertificateTesting.parseSubjectAltNames("DNS:example.com, DNS:www.example.com"), [
+      "DNS:example.com",
+      "DNS:www.example.com",
+    ]);
   });
 
   it("keeps traceroute as an operator-side plan", () => {

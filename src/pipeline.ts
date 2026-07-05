@@ -9,6 +9,7 @@ import {
 } from "./hibp.js";
 import { queryIpAssignmentIntelForTool } from "./ip-assignment.js";
 import { queryInfraReputationForTool, queryPhoneReputationForTool } from "./reputation.js";
+import { queryTlsCertificateChainForTool } from "./tls-certificate.js";
 import {
   extractIndicatorsForTool,
   snapshotUrlForTool,
@@ -108,7 +109,12 @@ export async function pipelineReconForTool(
     const emails = uniqueBounded([...indicators.emails, ...derivedIndicators.emails], maxLookups);
     const phones = uniqueBounded(derivedIndicators.phones, maxLookups);
     const hashes = indicators.hashes.slice(0, maxLookups);
-    const [crtshDomains, infraReputation, hibpEmails, phoneReputation, pwnedHashes] = await Promise.all([
+    const [tlsCertificates, crtshDomains, infraReputation, hibpEmails, phoneReputation, pwnedHashes] = await Promise.all([
+      Promise.all(
+        domains.map((domain) =>
+          queryTlsCertificateChainForTool({ host: domain })
+        ),
+      ),
       params.skipHighExpansion ? Promise.resolve([]) : Promise.all(
         domains.map((domain) =>
           queryCrtshDomainForTool({ domain, limit: 25, refresh: params.refresh, signal: params.signal, cache })
@@ -141,7 +147,7 @@ export async function pipelineReconForTool(
         ),
       ),
     ]);
-    stages.push("domain_authority_intel", "ip_assignment_intel", "crtsh_domain", "infra_reputation", "hibp_email_breach", "phone_reputation", "pwned_password_hash");
+    stages.push("domain_authority_intel", "ip_assignment_intel", "tls_certificate_chain", "crtsh_domain", "infra_reputation", "hibp_email_breach", "phone_reputation", "pwned_password_hash");
     return {
       ok: true,
       effort: params.effort,
@@ -153,6 +159,7 @@ export async function pipelineReconForTool(
         domainNetwork,
         domainAuthority,
         ipAssignments,
+        tlsCertificates,
         derivedIndicators,
         crtshDomains,
         infraReputation,

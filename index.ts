@@ -36,6 +36,10 @@ import {
   queryIpAssignmentIntelForTool,
 } from "./src/ip-assignment.js";
 import {
+  TlsCertificateChainSchema,
+  queryTlsCertificateChainForTool,
+} from "./src/tls-certificate.js";
+import {
   PipelineReconSchema,
   pipelineReconForTool,
 } from "./src/pipeline.js";
@@ -155,6 +159,14 @@ export default defineToolPlugin({
       parameters: IpAssignmentIntelSchema,
       execute: (params, _config, context) =>
         queryIpAssignmentIntelForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_tls_certificate_chain",
+      label: "OSINT TLS Certificate Chain",
+      description:
+        "Inspect a public TLS endpoint's presented certificate chain, fingerprints, issuer/subject metadata, and return an openssl reproduction command without executing shell commands.",
+      parameters: TlsCertificateChainSchema,
+      execute: queryTlsCertificateChainForTool,
     }),
     tool({
       name: "osint_bot_identity_assess",
