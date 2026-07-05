@@ -47,6 +47,7 @@ type ExtractedIndicators = {
   domains: string[];
   ipv4: string[];
   emails: string[];
+  phones: string[];
   handles: string[];
   hashes: string[];
 };
@@ -104,11 +105,16 @@ function extractIndicators(text: string): ExtractedIndicators {
     /(?<![\w@])@[A-Z0-9_][A-Z0-9_.-]{1,30}\b/gi,
     (value) => value.toLowerCase(),
   );
+  const phones = collectMatches(
+    text,
+    /(?<![\w.+-])(?:\+1[\s.-]*)?(?:\(\d{3}\)|\d{3})[\s.-]\d{3}[\s.-]\d{4}\b/g,
+    normalizePhoneText,
+  );
   const hashes = collectMatches(text, /\b(?:[a-f0-9]{32}|[a-f0-9]{40}|[a-f0-9]{64})\b/gi, (
     value,
   ) => value.toLowerCase());
   const domains = collectDomains(text, urls, emails);
-  return { urls, domains, ipv4, emails, handles, hashes };
+  return { urls, domains, ipv4, emails, phones, handles, hashes };
 }
 
 async function snapshotUrl(params: {
@@ -205,6 +211,17 @@ function uniqueBounded(values: readonly string[]): string[] {
 
 function normalizeUrlText(value: string): string {
   return value.replace(/[.,;:!?]+$/g, "");
+}
+
+function normalizePhoneText(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+${digits}`;
+  }
+  return "";
 }
 
 function normalizePublicHttpUrl(input: string): string | undefined {
@@ -329,6 +346,7 @@ export const testing = {
   extractIndicators,
   htmlToVisibleText,
   normalizeCanonicalUrl,
+  normalizePhoneText,
   normalizePublicHttpUrl,
   parseHtmlMetadata,
 };

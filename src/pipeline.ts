@@ -26,6 +26,8 @@ import {
 const DEFAULT_MAX_LOOKUPS = 3;
 const MAX_LOOKUPS = 10;
 const MAX_DERIVED_HOSTS = 100;
+const PIPELINE_OUTPUT_TARGET_CHARS = 30_000;
+const PIPELINE_BUDGET_ARRAY_LIMIT = 3;
 
 export const PipelineReconSchema = Type.Object(
   {
@@ -127,7 +129,7 @@ export async function pipelineReconForTool(
       derivedIndicatorsFromAuthorityResults(ipAssignmentsFull),
     );
     const emails = uniqueBounded([...indicators.emails, ...contactIndicators.emails], maxLookups);
-    const phones = uniqueBounded(contactIndicators.phones, maxLookups);
+    const phones = uniqueBounded(indicators.phones, maxLookups);
     const hashes = indicators.hashes.slice(0, maxLookups);
     const [tlsCertificatesFull, infraReputation, shodanHost, hibpEmails, phoneReputation, pwnedHashes] = await Promise.all([
       Promise.all(
@@ -210,7 +212,7 @@ export async function pipelineReconForTool(
     const businessReputationSummary = summarizeBusinessReputationResults(businessReputation);
     const compactBusinessReputation = businessReputation.map(compactBusinessReputationResult);
     stages.push("domain_authority_intel", "ip_assignment_intel", "tls_certificate_chain", "cdn_ddos_detect", "business_reputation_lookup", "infra_reputation", "shodan_host", "hibp_email_breach", "phone_reputation", "pwned_password_hash");
-    return {
+    return fitPipelineOutputBudget({
       ok: true,
       effort: params.effort,
       stages,
@@ -243,7 +245,7 @@ export async function pipelineReconForTool(
       },
       caveat:
         "High recon is bounded by maxLookups and available API keys. HIBP email checks require HIBP_API_KEY; failed keyed checks are returned as errors.",
-    };
+    });
   } finally {
     if (closeCache) {
       cache.close();
@@ -335,6 +337,217 @@ function mergeDerivedIndicators(
     phones: uniqueBounded(items.flatMap((item) => item.phones ?? []), MAX_LOOKUPS),
     hosts: uniqueBounded(items.flatMap((item) => item.hosts ?? []), MAX_DERIVED_HOSTS),
     ipAddresses: uniqueBounded(items.flatMap((item) => item.ipAddresses ?? []), MAX_LOOKUPS),
+  };
+}
+
+function fitPipelineOutputBudget<T extends { results?: Record<string, unknown>; limits?: Record<string, unknown> }>(
+  result: T,
+): T {
+  const originalChars = JSON.stringify(result).length;
+  if (originalChars <= PIPELINE_OUTPUT_TARGET_CHARS || !result.results) {
+    return result;
+  }
+  const compacted = {
+    ...result,
+    limits: {
+      ...result.limits,
+      outputCompacted: true,
+      outputTargetChars: PIPELINE_OUTPUT_TARGET_CHARS,
+      originalChars,
+    },
+    results: compactPipelineResultsForBudget(result.results),
+  };
+  const compactedChars = JSON.stringify(compacted).length;
+  if (compactedChars <= PIPELINE_OUTPUT_TARGET_CHARS) {
+    return {
+      ...compacted,
+      limits: {
+        ...compacted.limits,
+        compactedChars,
+      },
+    } as T;
+  }
+  const summaryOnly = {
+    ...compacted,
+    limits: {
+      ...compacted.limits,
+      compactedChars,
+      summaryOnly: true,
+    },
+    results: summarizePipelineResultsForBudget(result.results),
+  };
+  return {
+    ...summaryOnly,
+    limits: {
+      ...summaryOnly.limits,
+      summaryChars: JSON.stringify(summaryOnly).length,
+    },
+  } as T;
+}
+
+function compactPipelineResultsForBudget(results: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...results,
+    urlSnapshots: compactArray(results.urlSnapshots, compactUrlSnapshotForBudget),
+    domainNetwork: compactArray(results.domainNetwork, compactDomainNetworkForBudget),
+    domainAuthority: compactArray(results.domainAuthority, compactDomainAuthorityForBudget),
+    ipAssignments: compactArray(results.ipAssignments, compactIdentityForBudget),
+    tlsCertificates: compactArray(results.tlsCertificates, compactTlsCertificateForBudget),
+    cdnDdosProtection: compactArray(results.cdnDdosProtection, compactIdentityForBudget),
+    publicKnowledgeContext: compactArray(results.publicKnowledgeContext, compactPublicKnowledgeForBudget),
+    businessReputation: compactArray(results.businessReputation, compactIdentityForBudget),
+    infraReputation: compactArray(results.infraReputation, compactIdentityForBudget),
+    shodanHost: compactArray(results.shodanHost, compactIdentityForBudget),
+    hibpEmails: compactArray(results.hibpEmails, compactIdentityForBudget),
+    phoneReputation: compactArray(results.phoneReputation, compactIdentityForBudget),
+    pwnedHashes: compactArray(results.pwnedHashes, compactIdentityForBudget),
+    derivedIndicators: compactDerivedIndicatorsForBudget(results.derivedIndicators),
+    omittedResultCounts: omittedResultCounts(results),
+  };
+}
+
+function compactArray(value: unknown, compact: (value: unknown) => unknown): unknown {
+  return Array.isArray(value) ? value.slice(0, PIPELINE_BUDGET_ARRAY_LIMIT).map(compact) : value;
+}
+
+function omittedResultCounts(results: Record<string, unknown>): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(results)
+      .filter(([, value]) => Array.isArray(value) && value.length > PIPELINE_BUDGET_ARRAY_LIMIT)
+      .map(([key, value]) => [key, (value as unknown[]).length - PIPELINE_BUDGET_ARRAY_LIMIT]),
+  );
+}
+
+function summarizePipelineResultsForBudget(results: Record<string, unknown>): Record<string, unknown> {
+  return {
+    resultCounts: Object.fromEntries(
+      Object.entries(results).filter(([, value]) => Array.isArray(value)).map(([key, value]) => [key, (value as unknown[]).length]),
+    ),
+    businessReputationSummary: compactArray(results.businessReputationSummary, compactIdentityForBudget),
+    derivedIndicators: compactDerivedIndicatorsForBudget(results.derivedIndicators),
+    deferredSources: results.deferredSources,
+  };
+}
+
+function compactIdentityForBudget(value: unknown): unknown {
+  return value;
+}
+
+function compactUrlSnapshotForBudget(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  return {
+    ok: source.ok,
+    url: source.url,
+    finalUrl: source.finalUrl,
+    status: source.status,
+    contentType: source.contentType,
+    title: source.title,
+    canonicalUrl: source.canonicalUrl,
+    truncated: source.truncated,
+  };
+}
+
+function compactDomainNetworkForBudget(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  return {
+    ok: source.ok,
+    domain: source.domain,
+    dns: source.dns,
+    bgp: source.bgp,
+    summary: source.summary,
+    sources: source.sources,
+    caveat: source.caveat,
+  };
+}
+
+function compactDomainAuthorityForBudget(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  return {
+    ok: source.ok,
+    inputDomain: source.inputDomain,
+    registeredDomain: source.registeredDomain,
+    dnsAuthority: source.dnsAuthority,
+    rdap: source.rdap,
+    sources: source.sources,
+    caveat: source.caveat,
+  };
+}
+
+function compactTlsCertificateForBudget(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  return {
+    ok: source.ok,
+    host: source.host,
+    port: source.port,
+    authorized: source.authorized,
+    authorizationError: source.authorizationError,
+    protocol: source.protocol,
+    resolvedAddresses: source.resolvedAddresses,
+    chain: Array.isArray(source.chain)
+      ? source.chain.slice(0, 2).map((cert) => {
+        if (!cert || typeof cert !== "object") {
+          return cert;
+        }
+        const item = cert as Record<string, unknown>;
+        return {
+          subject: item.subject,
+          issuer: item.issuer,
+          validFrom: item.validFrom,
+          validTo: item.validTo,
+          fingerprint256: item.fingerprint256,
+          subjectAltNames: Array.isArray(item.subjectAltNames) ? item.subjectAltNames.slice(0, 12) : item.subjectAltNames,
+        };
+      })
+      : source.chain,
+    caveat: source.caveat,
+  };
+}
+
+function compactPublicKnowledgeForBudget(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  return {
+    ok: source.ok,
+    query: source.query,
+    wikidata: compactKnownObject(source.wikidata, ["id", "label", "description", "aliases", "facts", "url"]),
+    wikipedia: compactKnownObject(source.wikipedia, ["title", "description", "url"]),
+    relatedEntities: Array.isArray(source.relatedEntities) ? source.relatedEntities.slice(0, 5) : source.relatedEntities,
+    caveat: source.caveat,
+  };
+}
+
+function compactKnownObject(value: unknown, keys: readonly string[]): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  return Object.fromEntries(keys.map((key) => [key, source[key]]).filter(([, item]) => item !== undefined));
+}
+
+function compactDerivedIndicatorsForBudget(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  return {
+    emails: Array.isArray(source.emails) ? source.emails.slice(0, 10) : source.emails,
+    phones: Array.isArray(source.phones) ? source.phones.slice(0, 10) : source.phones,
+    hosts: Array.isArray(source.hosts) ? source.hosts.slice(0, 25) : source.hosts,
+    ipAddresses: Array.isArray(source.ipAddresses) ? source.ipAddresses.slice(0, 10) : source.ipAddresses,
   };
 }
 
@@ -702,3 +915,7 @@ function compactTlsCertificateResult(result: unknown): unknown {
     caveat: source.caveat,
   };
 }
+
+export const testing = {
+  fitPipelineOutputBudget,
+};

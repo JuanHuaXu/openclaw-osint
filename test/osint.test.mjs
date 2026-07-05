@@ -11,7 +11,7 @@ import { testing as domainAuthorityTesting } from "../dist/src/domain-authority.
 import { testing as domainNetworkTesting } from "../dist/src/domain-network.js";
 import { testing as hibpTesting } from "../dist/src/hibp.js";
 import { testing as ipAssignmentTesting } from "../dist/src/ip-assignment.js";
-import { pipelineReconForTool } from "../dist/src/pipeline.js";
+import { pipelineReconForTool, testing as pipelineTesting } from "../dist/src/pipeline.js";
 import { testing as publicKnowledgeTesting } from "../dist/src/public-knowledge.js";
 import { testing as reputationTesting } from "../dist/src/reputation.js";
 import { testing as shodanTesting } from "../dist/src/shodan.js";
@@ -23,13 +23,15 @@ describe("openclaw osint tools", () => {
     const indicators = testing.extractIndicators(`
       Contact admin@example.com and @OpenClawHQ.
       Visit https://example.com/path?q=1, then inspect 203.0.113.42.
+      Call +1 (202) 555-0100, but do not treat lockbit123.com as a phone.
       Hash: e3b0c44298fc1c149afbf4c8996fb924
     `);
 
     assert.deepEqual(indicators.urls, ["https://example.com/path?q=1"]);
-    assert.deepEqual(indicators.domains, ["example.com"]);
+    assert.deepEqual(indicators.domains, ["example.com", "lockbit123.com"]);
     assert.deepEqual(indicators.ipv4, ["203.0.113.42"]);
     assert.deepEqual(indicators.emails, ["admin@example.com"]);
+    assert.deepEqual(indicators.phones, ["+12025550100"]);
     assert.deepEqual(indicators.handles, ["@openclawhq"]);
     assert.deepEqual(indicators.hashes, ["e3b0c44298fc1c149afbf4c8996fb924"]);
   });
@@ -151,6 +153,7 @@ describe("openclaw osint tools", () => {
       assert.equal(result.results.businessReputation.length, 1);
       assert.equal(["Cloudflare, Inc.", "EDGECAST"].includes(result.results.businessReputation[0].business), true);
       assert.equal("bbbSearch" in result.results.businessReputation[0], false);
+      assert.deepEqual(result.results.phoneReputation, []);
       assert.equal(result.results.derivedIndicators.hosts.includes("example.com"), true);
       assert.equal(result.results.derivedIndicators.hosts.includes("mail.example.net"), true);
       assert.equal(result.results.derivedIndicators.hosts.includes("edge.example.net"), true);
@@ -159,6 +162,38 @@ describe("openclaw osint tools", () => {
       cache.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("compacts high pipeline output before returning oversized tool results", async () => {
+    const result = pipelineTesting.fitPipelineOutputBudget({
+      ok: true,
+      effort: "high",
+      limits: { maxLookups: 4 },
+      results: {
+        urlSnapshots: [{
+          ok: true,
+          url: "https://example.com",
+          finalUrl: "https://example.com/",
+          status: 200,
+          excerpt: "noisy page ".repeat(4000),
+        }],
+        tlsCertificates: [{
+          ok: true,
+          host: "example.com",
+          chain: [{
+            subject: "CN=example.com",
+            issuer: "CN=Example CA",
+            subjectAltNames: Array.from({ length: 200 }, (_value, index) => `alt-${index}.example.com`),
+          }],
+        }],
+      },
+    });
+    const serialized = JSON.stringify(result);
+
+    assert.equal(result.limits.outputCompacted, true);
+    assert.equal(serialized.includes("noisy page noisy page"), false);
+    assert.equal(serialized.length < result.limits.originalChars, true);
+    assert.doesNotThrow(() => JSON.parse(serialized));
   });
 
   it("derives bounded reputation indicators from RDAP contacts", () => {

@@ -151,7 +151,7 @@ Pipeline effort levels:
 
 - `light`: extract indicators only, no network lookups
 - `medium`: extract indicators, then enrich bounded URLs, domains, and Wikidata/Wikipedia public-knowledge context
-- `high`: extract indicators, enrich URLs/domains, then correlate TLS certificate chains, DNS-discovered IPs, RIR allocation records, Shodan host summaries, Wikidata/Wikipedia context, WHOIS/RDAP/BGP-derived business names, professional/workplace/disclosure leads, and RDAP-derived emails/phones into reputation checks. Host indicators are aggregated once from input domains, email domains, TLS SANs, Shodan hostnames, and related host sources.
+- `high`: extract indicators, enrich URLs/domains, then correlate TLS certificate chains, DNS-discovered IPs, RIR allocation records, Shodan host summaries, Wikidata/Wikipedia context, WHOIS/RDAP/BGP-derived business names, professional/workplace/disclosure leads, RDAP-derived emails, and explicit input phones into reputation checks. Host indicators are aggregated once from input domains, email domains, TLS SANs, Shodan hostnames, and related host sources.
 
 ## Tools
 
@@ -185,13 +185,15 @@ Runs bounded recon from raw text by effort level:
 
 - `light`: local indicator extraction only
 - `medium`: URL snapshots, domain network intel, and compact public-knowledge context
-- `high`: medium plus TLS certificate chain inspection, CDN/DDoS protection detection, authority DNS/RDAP, RIR IP assignment RDAP, Shodan host summaries for input or DNS-discovered IPs, business reputation/professional/workplace/disclosure leads for WHOIS/RDAP/BGP/Wikidata-derived organization names, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for RDAP-derived phone contacts, and pwned-password hash checks where indicators exist
+- `high`: medium plus TLS certificate chain inspection, CDN/DDoS protection detection, authority DNS/RDAP, RIR IP assignment RDAP, Shodan host summaries for input or DNS-discovered IPs, business reputation/professional/workplace/disclosure leads for WHOIS/RDAP/BGP/Wikidata-derived organization names, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for explicit input phone indicators, and pwned-password hash checks where indicators exist
 
 The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline. Shodan host checks use the full API when `SHODAN_API_KEY` exists and fall back to keyless InternetDB when it does not. RDAP-derived contact indicators and business-source hits are reputation inputs only, not identity proof or complete complaint history. `crt.sh` remains available through `osint_crtsh_domain`, but high-effort pipeline reports it as a deferred optional source because the public service is often slow or unavailable.
 
 High-effort pipeline output keeps expanded hostnames in one canonical place: `results.derivedIndicators.hosts`. Stage-level results avoid repeating those hostnames back into the agent context.
 
 High-effort pipeline also returns `results.businessReputationSummary` before compacted `results.businessReputation`, so exact BBB misses and related BBB hits survive tool-output truncation.
+
+High-effort pipeline self-compacts oversized result objects before returning them to OpenClaw. It preserves top-level findings and reports omitted per-stage counts instead of relying on downstream truncation. RDAP-derived phone contacts remain visible as derived indicators, but FTC phone reputation runs only for explicit phone-like input indicators.
 
 ### `osint_cdn_ddos_detect`
 
