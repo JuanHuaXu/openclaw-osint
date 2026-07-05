@@ -28,6 +28,10 @@ import {
   queryPhoneReputationForTool,
 } from "./src/reputation.js";
 import {
+  PipelineReconSchema,
+  pipelineReconForTool,
+} from "./src/pipeline.js";
+import {
   ExtractIndicatorsSchema,
   UrlSnapshotSchema,
   extractIndicatorsForTool,
@@ -141,6 +145,15 @@ export default defineToolPlugin({
         "Assess mismatch risk between a US phone number assignment, observed SIP/RTP IP paths, DNS/BGP network ownership, and STIR/SHAKEN attestation. Does not identify private owners.",
       parameters: VoipPathAssessSchema,
       execute: assessVoipPathForTool,
+    }),
+    tool({
+      name: "osint_pipeline_recon",
+      label: "OSINT Pipeline Recon",
+      description:
+        "Run bounded OSINT recon by effort level: light extracts indicators, medium enriches URLs/domains, high runs the broader safe lookup suite.",
+      parameters: PipelineReconSchema,
+      execute: (params, _config, context) =>
+        pipelineReconForTool({ ...params, signal: context.signal }),
     }),
   ],
 });

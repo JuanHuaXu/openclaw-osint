@@ -19,6 +19,7 @@ flowchart TD
   Plugin --> Bot["osint_bot_identity_assess"]
   Plugin --> Hibp["HIBP tools"]
   Plugin --> CacheStatus["osint_cache_status"]
+  Plugin --> Pipeline["osint_pipeline_recon"]
 
   Web --> Ssrfg["OpenClaw SSRF guard"]
   Certs --> Crtsh["crt.sh"]
@@ -51,6 +52,12 @@ flowchart TD
   Evidence --> Bot
   Bot --> Guard["No private human identity resolution"]
   Blocked --> Guard
+  Pipeline --> Extract
+  Pipeline --> Web
+  Pipeline --> Network
+  Pipeline --> Certs
+  Pipeline --> Infra
+  Pipeline --> Hibp
 ```
 
 ```mermaid
@@ -79,6 +86,12 @@ flowchart TD
   Voip --> Bot
 ```
 
+Pipeline effort levels:
+
+- `light`: extract indicators only, no network lookups
+- `medium`: extract indicators, then enrich bounded URLs and domains
+- `high`: extract indicators, then run the broader bounded suite for URLs, domains, IPs, emails, and password hashes
+
 ## Tools
 
 ### `osint_extract_indicators`
@@ -104,6 +117,16 @@ Fetches one public HTTP(S) URL through OpenClaw's SSRF guard and returns bounded
 - description
 - canonical URL
 - bounded body excerpt wrapped as untrusted external content
+
+### `osint_pipeline_recon`
+
+Runs bounded recon from raw text by effort level:
+
+- `light`: local indicator extraction only
+- `medium`: URL snapshots and domain network intel
+- `high`: medium plus crt.sh, infrastructure reputation, HIBP email checks, and pwned-password hash checks where indicators exist
+
+The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline.
 
 ### `osint_crtsh_domain`
 
@@ -249,7 +272,7 @@ The plugin uses a bounded local SQLite cache for cacheable public sources.
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.6.1.tgz
+openclaw plugins install ./openclaw-osint-0.7.0.tgz
 ```
 
 Restart the OpenClaw gateway after install.

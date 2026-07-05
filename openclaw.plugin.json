@@ -1,6 +1,6 @@
 {
   "id": "osint",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "activation": {
     "onStartup": true
   },
@@ -25,7 +25,8 @@
       "osint_phone_reputation",
       "osint_infra_reputation",
       "osint_bot_identity_assess",
-      "osint_voip_path_assess"
+      "osint_voip_path_assess",
+      "osint_pipeline_recon"
     ]
   }
 }

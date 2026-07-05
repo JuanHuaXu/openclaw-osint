@@ -7,6 +7,7 @@ import { OsintCache } from "../dist/src/cache.js";
 import { testing as crtshTesting } from "../dist/src/crtsh.js";
 import { testing as domainNetworkTesting } from "../dist/src/domain-network.js";
 import { testing as hibpTesting } from "../dist/src/hibp.js";
+import { pipelineReconForTool } from "../dist/src/pipeline.js";
 import { testing as reputationTesting } from "../dist/src/reputation.js";
 import { testing } from "../dist/src/tools.js";
 
@@ -30,6 +31,32 @@ describe("openclaw osint tools", () => {
     assert.equal(testing.normalizePublicHttpUrl("https://example.com/path#frag"), "https://example.com/path");
     assert.equal(testing.normalizePublicHttpUrl("file:///etc/passwd"), undefined);
     assert.equal(testing.normalizePublicHttpUrl("not a url"), undefined);
+  });
+
+  it("runs light pipeline recon as extraction only", async () => {
+    const result = await pipelineReconForTool({
+      effort: "light",
+      text: "Visit https://example.com and contact admin@example.com from 203.0.113.42.",
+    });
+
+    assert.deepEqual(result.stages, ["extract_indicators"]);
+    assert.deepEqual(result.indicators.urls, ["https://example.com"]);
+    assert.deepEqual(result.indicators.emails, ["admin@example.com"]);
+    assert.deepEqual(result.results, {});
+  });
+
+  it("runs medium pipeline recon without high-effort lookups", async () => {
+    const result = await pipelineReconForTool({
+      effort: "medium",
+      maxLookups: 1,
+      text: "Visit file:///etc/passwd then https://localhost/path.",
+    });
+
+    assert.deepEqual(result.stages, ["extract_indicators", "url_snapshot", "domain_network_intel"]);
+    assert.equal(result.results.urlSnapshots.length, 1);
+    assert.equal(result.results.domainNetwork.length, 1);
+    assert.equal("crtshDomains" in result.results, false);
+    assert.equal("hibpEmails" in result.results, false);
   });
 
   it("extracts HTML metadata and visible text", () => {
