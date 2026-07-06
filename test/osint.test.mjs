@@ -70,7 +70,7 @@ describe("openclaw osint tools", () => {
         "set-cookie": "connect.sid=s%3Atest; Path=/; HttpOnly",
       },
       html: `
-        Cannot GET /__openclaw_osint_404_deadbeef
+        Cannot GET /assets/deadbeef.css
         {"detail":"Not Found"}
         at Layer.handle [as handle_request] (node:internal/modules/cjs/loader:123:45)
       `,
@@ -186,8 +186,10 @@ describe("openclaw osint tools", () => {
     const first = testing.build404ProbeUrl("https://example.com/app/page?q=1#top");
     const second = testing.build404ProbeUrl("https://example.com/app/page?q=1#top");
 
-    assert.match(first, /^https:\/\/example\.com\/__openclaw_osint_404_[a-f0-9]{32}$/);
-    assert.match(second, /^https:\/\/example\.com\/__openclaw_osint_404_[a-f0-9]{32}$/);
+    assert.match(first, /^https:\/\/example\.com\/(?:assets\/[a-f0-9]{16}\.(?:css|js)|static\/[a-f0-9]{16}\.png|media\/[a-f0-9]{16}\.webp|favicon-[a-f0-9]{16}\.ico|robots-[a-f0-9]{16}\.txt)$/);
+    assert.match(second, /^https:\/\/example\.com\/(?:assets\/[a-f0-9]{16}\.(?:css|js)|static\/[a-f0-9]{16}\.png|media\/[a-f0-9]{16}\.webp|favicon-[a-f0-9]{16}\.ico|robots-[a-f0-9]{16}\.txt)$/);
+    assert.equal(first.includes("openclaw"), false);
+    assert.equal(second.includes("openclaw"), false);
     assert.notEqual(first, second);
   });
 

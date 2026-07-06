@@ -13,6 +13,14 @@ const FETCH_TIMEOUT_MS = 12_000;
 const MAX_INDICATORS_PER_TYPE = 100;
 const DEFAULT_ERROR_PROBE_CHARS = 1_200;
 const MAX_ERROR_PROBE_CHARS = 4_000;
+const MISSING_RESOURCE_PROBE_PATHS = [
+  (id: string) => `/assets/${id}.css`,
+  (id: string) => `/assets/${id}.js`,
+  (id: string) => `/static/${id}.png`,
+  (id: string) => `/media/${id}.webp`,
+  (id: string) => `/favicon-${id}.ico`,
+  (id: string) => `/robots-${id}.txt`,
+];
 
 export const ExtractIndicatorsSchema = Type.Object(
   {
@@ -374,7 +382,9 @@ async function fetch404FingerprintProbe(params: {
 function build404ProbeUrl(baseUrl: string): string | undefined {
   try {
     const parsed = new URL(baseUrl);
-    parsed.pathname = `/__openclaw_osint_404_${randomUUID().replace(/-/g, "")}`;
+    const id = randomUUID().replace(/-/g, "").slice(0, 16);
+    const path = MISSING_RESOURCE_PROBE_PATHS[Number.parseInt(id.slice(0, 2), 16) % MISSING_RESOURCE_PROBE_PATHS.length] ?? MISSING_RESOURCE_PROBE_PATHS[0];
+    parsed.pathname = path(id);
     parsed.search = "";
     parsed.hash = "";
     return normalizePublicHttpUrl(parsed.toString());
