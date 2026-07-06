@@ -8,6 +8,10 @@ import {
   detectCdnDdosForTool,
 } from "./src/cdn.js";
 import {
+  FingerprintCveLookupSchema,
+  queryFingerprintCvesForTool,
+} from "./src/cve.js";
+import {
   CrtshDomainSchema,
   OsintCacheStatusSchema,
   osintCacheStatusForTool,
@@ -94,6 +98,15 @@ export default defineToolPlugin({
       parameters: CdnDdosDetectSchema,
       execute: (params, _config, context) =>
         detectCdnDdosForTool({ ...params, signal: context.signal }),
+    }),
+    tool({
+      name: "osint_fingerprint_cve_lookup",
+      label: "OSINT Fingerprint CVE Lookup",
+      description:
+        "Map concrete software/framework fingerprints to bounded NVD/OSV vulnerability lookups and return RCE plus adjacent crash, bleed, and hop-shaped CVEs.",
+      parameters: FingerprintCveLookupSchema,
+      execute: (params, _config, context) =>
+        queryFingerprintCvesForTool({ ...params, signal: context.signal }),
     }),
     tool({
       name: "osint_business_reputation_lookup",

@@ -1,6 +1,6 @@
 # OpenClaw OSINT
 
-MIT-licensed standalone OpenClaw plugin for bounded public-source OSINT helpers. Current package version: `0.22.1`.
+MIT-licensed standalone OpenClaw plugin for bounded public-source OSINT helpers. Current package version: `0.23.0`.
 
 This plugin is intentionally conservative. It provides useful public-source primitives without credentialed scraping, private data broker access, exploit checks, port scans, or shell execution.
 
@@ -12,7 +12,7 @@ Use it when an OpenClaw agent needs to extract indicators, snapshot public web p
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.22.1.tgz
+openclaw plugins install ./openclaw-osint-0.23.0.tgz
 ```
 
 Restart the OpenClaw gateway after installing or upgrading the plugin.
@@ -50,7 +50,7 @@ Most tools work without API keys. Keys unlock richer source coverage:
 - `OPENCLAW_OSINT_TARGET_FETCH_BACKEND=podman`: run direct URL snapshot fetches inside an isolated Podman worker namespace and return a bounded tcpdump-derived packet summary.
 - `OPENCLAW_OSINT_PODMAN_BIN`: override the Podman binary path when `podman` is not on `PATH`.
 
-No key is required for local indicator extraction, URL snapshots, passive software fingerprint hints, DNS/network enrichment, TLS certificate inspection, Wikidata/Wikipedia context, keyless Shodan InternetDB, or cache status.
+No key is required for local indicator extraction, URL snapshots, passive software fingerprint hints, focused NVD/OSV fingerprint CVE lookups, DNS/network enrichment, TLS certificate inspection, Wikidata/Wikipedia context, keyless Shodan InternetDB, or cache status.
 
 ## Optional Target-Fetch Sidecar
 
@@ -186,7 +186,9 @@ flowchart TD
   Fingerprint --> Headers["headers and cookies"]
   Fingerprint --> Body["HTML / asset markers"]
   Fingerprint --> Probe["one randomized same-origin 404 probe"]
+  Fingerprint --> Cves["osint_fingerprint_cve_lookup"]
   Probe --> ErrorBody["bounded error-page evidence"]
+  Cves --> Impact["RCE / crash / bleed / hop CVEs"]
 ```
 
 ### Domain And Network Flow
@@ -240,7 +242,7 @@ Pipeline effort levels:
 
 - `light`: extract indicators only, no network lookups
 - `medium`: extract indicators, then enrich bounded URLs, domains, and Wikidata/Wikipedia public-knowledge context
-- `high`: extract indicators, enrich URLs/domains, then correlate TLS certificate chains, DNS-discovered IPs, RIR allocation records, Shodan host summaries, Wikidata/Wikipedia context, WHOIS/RDAP/BGP-derived business names, professional/workplace/disclosure leads, RDAP-derived emails, and explicit input phones into reputation checks. Host indicators are aggregated once from input domains, email domains, TLS SANs, Shodan hostnames, and related host sources.
+- `high`: extract indicators, enrich URLs/domains, then correlate TLS certificate chains, DNS-discovered IPs, RIR allocation records, Shodan host summaries, focused fingerprint CVE lookups, Wikidata/Wikipedia context, WHOIS/RDAP/BGP-derived business names, professional/workplace/disclosure leads, RDAP-derived emails, and explicit input phones into reputation checks. Host indicators are aggregated once from input domains, email domains, TLS SANs, Shodan hostnames, and related host sources.
 
 ## Tools
 
@@ -290,13 +292,15 @@ Runs bounded recon from raw text by effort level:
 
 - `light`: local indicator extraction only
 - `medium`: URL snapshots, domain network intel, and compact public-knowledge context
-- `high`: medium plus TLS certificate chain inspection, CDN/DDoS protection detection, authority DNS/RDAP, RIR IP assignment RDAP, Shodan host summaries for input or DNS-discovered IPs, business reputation/professional/workplace/disclosure leads for WHOIS/RDAP/BGP/Wikidata-derived organization names, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for explicit input phone indicators, and pwned-password hash checks where indicators exist
+- `high`: medium plus TLS certificate chain inspection, CDN/DDoS protection detection, authority DNS/RDAP, RIR IP assignment RDAP, Shodan host summaries for input or DNS-discovered IPs, focused fingerprint CVE lookups for concrete passive software versions, business reputation/professional/workplace/disclosure leads for WHOIS/RDAP/BGP/Wikidata-derived organization names, infrastructure reputation for input or DNS-discovered IPs, HIBP email checks for input or RDAP-derived emails, phone reputation for explicit input phone indicators, and pwned-password hash checks where indicators exist
 
 The tool accepts `text` as the canonical input and `target` as an alias for model/tool-search turns that phrase the input as a target URL, domain, actor, or indicator list.
 
 The pipeline deduplicates indicators through `osint_extract_indicators`, applies `maxLookups` caps per indicator class, and returns stage-labeled results. URL stages include the same passive fingerprint hints as `osint_url_snapshot`. HIBP email checks still require `HIBP_API_KEY`; missing keys return tool errors instead of blocking the rest of the pipeline. Shodan host checks use the full API when `SHODAN_API_KEY` exists and fall back to keyless InternetDB when it does not. RDAP-derived contact indicators and business-source hits are reputation inputs only, not identity proof or complete complaint history. `crt.sh` remains available through `osint_crtsh_domain`, but high-effort pipeline reports it as a deferred optional source because the public service is often slow or unavailable.
 
 High-effort pipeline output keeps expanded hostnames in one canonical place: `results.derivedIndicators.hosts`. Stage-level results avoid repeating those hostnames back into the agent context.
+
+High-effort pipeline runs `osint_fingerprint_cve_lookup` only when URL snapshots produce concrete software/framework versions. Versionless or unmapped fingerprints are skipped instead of broadening into noisy CVE searches.
 
 High-effort pipeline also returns `results.businessReputationSummary` before compacted `results.businessReputation`, so exact BBB misses and related BBB hits survive tool-output truncation.
 
@@ -324,6 +328,26 @@ Evidence sources:
 - observed hostnames from related stage data
 
 Recognized provider families include Cloudflare, Akamai, Fastly, Amazon CloudFront, Imperva, Sucuri, Google Cloud CDN, Azure Front Door, and Bunny CDN. Results include provider, category, confidence, and evidence snippets. Detection is heuristic; no match is not proof of no protection.
+
+### `osint_fingerprint_cve_lookup`
+
+Looks up RCE and adjacent crash, bleed, and hop-shaped CVEs for concrete software or framework fingerprints.
+
+Inputs:
+
+- `software` plus `version`
+- or `fingerprints` copied from `osint_url_snapshot.fingerprint.fingerprints`
+
+The tool maps known products to bounded NVD CPE or OSV package queries. Versionless or unmapped fingerprints are skipped instead of returning broad CVE noise.
+
+Impact focus:
+
+- `rce`: remote/arbitrary command or code execution
+- `crash`: denial of service, crash, panic, resource exhaustion
+- `bleed`: information or memory disclosure, overread, data leak
+- `hop`: auth bypass, traversal, SSRF, request smuggling, privilege escalation
+
+No API key is required, but NVD/OSV rate limits and source freshness still apply. Results are vulnerability leads for defensive triage, not exploit validation.
 
 ### `osint_business_reputation_lookup`
 

@@ -2,6 +2,7 @@ import { Type, type Static } from "typebox";
 import { queryBusinessReputationForTool } from "./business.js";
 import { OsintCache } from "./cache.js";
 import { detectCdnDdos } from "./cdn.js";
+import { queryFingerprintCvesForTool } from "./cve.js";
 import { queryDomainAuthorityIntelForTool } from "./domain-authority.js";
 import { queryDomainNetworkIntelForTool } from "./domain-network.js";
 import {
@@ -142,6 +143,28 @@ export async function pipelineReconForTool(
     const emails = uniqueBounded([...indicators.emails, ...contactIndicators.emails], maxLookups);
     const phones = uniqueBounded(indicators.phones, maxLookups);
     const hashes = indicators.hashes.slice(0, maxLookups);
+    const urlFingerprints = fingerprintsFromUrlSnapshots(urlSnapshots);
+    const fingerprintCves = urlFingerprints.length > 0
+      ? await queryFingerprintCvesForTool({
+        fingerprints: urlFingerprints,
+        maxFindings: maxLookups,
+        refresh: params.refresh,
+        signal: params.signal,
+        cache,
+      })
+      : {
+        ok: true,
+        source: "fingerprint-cve",
+        results: [],
+        summary: {
+          fingerprintsChecked: 0,
+          withConcreteVersion: 0,
+          withMappedIdentity: 0,
+          findings: 0,
+          impactFocus: ["rce", "crash", "bleed", "hop"],
+        },
+        caveat: "No concrete URL snapshot fingerprints were available for CVE lookup.",
+      };
     const [tlsCertificatesFull, infraReputation, shodanHost, hibpEmails, phoneReputation, pwnedHashes] = await Promise.all([
       Promise.all(
         domains.map((domain) =>
@@ -222,7 +245,7 @@ export async function pipelineReconForTool(
     );
     const businessReputationSummary = summarizeBusinessReputationResults(businessReputation);
     const compactBusinessReputation = businessReputation.map(compactBusinessReputationResult);
-    stages.push("domain_authority_intel", "ip_assignment_intel", "tls_certificate_chain", "cdn_ddos_detect", "business_reputation_lookup", "infra_reputation", "shodan_host", "hibp_email_breach", "phone_reputation", "pwned_password_hash");
+    stages.push("domain_authority_intel", "ip_assignment_intel", "tls_certificate_chain", "cdn_ddos_detect", "fingerprint_cve_lookup", "business_reputation_lookup", "infra_reputation", "shodan_host", "hibp_email_breach", "phone_reputation", "pwned_password_hash");
     return fitPipelineOutputBudget({
       ok: true,
       effort: params.effort,
@@ -244,6 +267,7 @@ export async function pipelineReconForTool(
         ipAssignments,
         tlsCertificates,
         cdnDdosProtection,
+        fingerprintCves,
         publicKnowledgeContext,
         businessReputationSummary,
         businessReputation: compactBusinessReputation,
@@ -431,6 +455,7 @@ function compactPipelineResultsForBudget(results: Record<string, unknown>): Reco
     hibpEmails: compactArray(results.hibpEmails, compactIdentityForBudget),
     phoneReputation: compactArray(results.phoneReputation, compactIdentityForBudget),
     pwnedHashes: compactArray(results.pwnedHashes, compactIdentityForBudget),
+    fingerprintCves: compactIdentityForBudget(results.fingerprintCves),
     derivedIndicators: compactDerivedIndicatorsForBudget(results.derivedIndicators),
     omittedResultCounts: omittedResultCounts(results),
   };
@@ -476,8 +501,56 @@ function compactUrlSnapshotForBudget(value: unknown): unknown {
     contentType: source.contentType,
     title: source.title,
     canonicalUrl: source.canonicalUrl,
+    fingerprint: compactFingerprintForBudget(source.fingerprint),
     truncated: source.truncated,
   };
+}
+
+function compactFingerprintForBudget(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  const fingerprints = Array.isArray(source.fingerprints)
+    ? source.fingerprints.slice(0, 12).map((item) => {
+      if (!item || typeof item !== "object") {
+        return item;
+      }
+      const fingerprint = item as Record<string, unknown>;
+      return {
+        kind: fingerprint.kind,
+        name: fingerprint.name,
+        version: fingerprint.version,
+        confidence: fingerprint.confidence,
+        source: fingerprint.source,
+        evidence: Array.isArray(fingerprint.evidence) ? fingerprint.evidence.slice(0, 2) : undefined,
+      };
+    })
+    : [];
+  return {
+    fingerprints,
+    caveat: source.caveat,
+  };
+}
+
+function fingerprintsFromUrlSnapshots(results: readonly unknown[]) {
+  return results.flatMap((result) => {
+    if (!result || typeof result !== "object") {
+      return [];
+    }
+    const fingerprint = (result as Record<string, unknown>).fingerprint;
+    if (!fingerprint || typeof fingerprint !== "object") {
+      return [];
+    }
+    const fingerprints = (fingerprint as Record<string, unknown>).fingerprints;
+    return Array.isArray(fingerprints)
+      ? fingerprints.flatMap((item) =>
+        item && typeof item === "object" && typeof (item as Record<string, unknown>).name === "string"
+          ? [item as { name: string; version?: string; confidence?: string; source?: string; evidence?: string[] }]
+          : []
+      )
+      : [];
+  });
 }
 
 function compactDomainNetworkForBudget(value: unknown): unknown {

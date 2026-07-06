@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import { OsintCache } from "../dist/src/cache.js";
 import { testing as businessTesting } from "../dist/src/business.js";
 import { testing as cdnTesting } from "../dist/src/cdn.js";
+import { testing as cveTesting } from "../dist/src/cve.js";
 import { testing as crtshTesting } from "../dist/src/crtsh.js";
 import { testing as domainAuthorityTesting } from "../dist/src/domain-authority.js";
 import { testing as domainNetworkTesting } from "../dist/src/domain-network.js";
@@ -98,6 +99,73 @@ describe("openclaw osint tools", () => {
     assert.equal(fingerprints.some((item) => item.kind === "framework" && item.name === "Astro"), true);
     assert.equal(fingerprints.some((item) => item.kind === "framework" && item.name === "Preact"), true);
     assert.equal(fingerprints.some((item) => item.kind === "software" && item.name === "DemoOS" && item.version === "1.2.3"), true);
+  });
+
+  it("maps concrete fingerprints to bounded CVE identities", () => {
+    const fingerprints = cveTesting.normalizeFingerprintInputs({
+      fingerprints: [
+        { name: "nginx", version: "1.29.8", confidence: "high" },
+        { name: "Next.js", version: "15.3.4", confidence: "high" },
+        { name: "Caddy", confidence: "medium" },
+      ],
+    });
+
+    assert.deepEqual(fingerprints.map((item) => `${item.name}@${item.version ?? ""}`), [
+      "nginx@1.29.8",
+      "Next.js@15.3.4",
+      "Caddy@",
+    ]);
+    assert.deepEqual(cveTesting.identityForFingerprint(fingerprints[0]), [{
+      source: "nvd",
+      type: "cpe",
+      cpe: "cpe:2.3:a:nginx:nginx:1.29.8:*:*:*:*:*:*:*",
+    }]);
+    assert.deepEqual(cveTesting.identityForFingerprint(fingerprints[1]), [{
+      source: "osv",
+      type: "package",
+      ecosystem: "npm",
+      packageName: "next",
+    }]);
+    assert.deepEqual(cveTesting.identityForFingerprint(fingerprints[2]), []);
+  });
+
+  it("classifies RCE and adjacent vulnerability shapes", () => {
+    assert.deepEqual(cveTesting.classifyImpact("Remote code execution via command injection."), ["rce"]);
+    assert.deepEqual(cveTesting.classifyImpact("Denial of service crash from NULL pointer."), ["crash"]);
+    assert.deepEqual(cveTesting.classifyImpact("Out-of-bounds read causes information disclosure."), ["bleed"]);
+    assert.deepEqual(cveTesting.classifyImpact("Authentication bypass and SSRF enable internal hop."), ["hop"]);
+  });
+
+  it("parses NVD and OSV findings into impact-filterable rows", () => {
+    const nvd = cveTesting.parseNvdFindings({
+      vulnerabilities: [{
+        cve: {
+          id: "CVE-2099-0001",
+          descriptions: [{ lang: "en", value: "A flaw allows remote code execution in Example." }],
+          metrics: {
+            cvssMetricV31: [{ cvssData: { baseScore: 9.8, baseSeverity: "CRITICAL" } }],
+          },
+          references: [{ url: "https://example.test/cve", source: "vendor", tags: ["Exploit"] }],
+          cisaExploitAdd: "2099-01-02",
+        },
+      }],
+    });
+    const osv = cveTesting.parseOsvFindings({
+      vulns: [{
+        id: "GHSA-test",
+        summary: "Path traversal can lead to sensitive information disclosure.",
+        references: [{ url: "https://example.test/ghsa" }],
+      }],
+    });
+
+    assert.equal(nvd[0].id, "CVE-2099-0001");
+    assert.deepEqual(nvd[0].impactTags, ["rce"]);
+    assert.equal(nvd[0].severity, "CRITICAL");
+    assert.equal(nvd[0].cvss, 9.8);
+    assert.equal(nvd[0].knownExploited, true);
+    assert.deepEqual(nvd[0].references, ["https://example.test/cve (vendor; Exploit)"]);
+    assert.equal(osv[0].id, "GHSA-test");
+    assert.deepEqual(osv[0].impactTags, ["bleed", "hop"]);
   });
 
   it("builds randomized same-origin 404 probe URLs", () => {
@@ -262,6 +330,8 @@ describe("openclaw osint tools", () => {
       assert.equal(result.results.shodanHost.length, 1);
       assert.deepEqual(result.results.shodanHost[0].ports, [80, 443]);
       assert.equal(result.results.cdnDdosProtection.length, 1);
+      assert.equal(result.results.fingerprintCves.ok, true);
+      assert.equal(result.results.fingerprintCves.summary.fingerprintsChecked, 0);
       assert.equal(result.results.businessReputationSummary.length, 1);
       assert.equal(Array.isArray(result.keyFindings.businessCoverage), true);
       assert.equal(result.keyFindings.execution.phoneReputationRan, false);
