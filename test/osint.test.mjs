@@ -82,6 +82,23 @@ describe("openclaw osint tools", () => {
     assert.equal(fingerprints.some((item) => item.kind === "framework" && item.name === "Express session middleware"), true);
   });
 
+  it("profiles Astro, Preact, and app-version frontend evidence", () => {
+    const fingerprints = testing.fingerprintFromHttpEvidence({
+      headers: {},
+      html: `
+        <link rel="stylesheet" href="/_astro/Base.hash.css">
+        <script>self.Astro = self.Astro || {};</script>
+        <astro-island data-preact-island-id="1" component-url="/_astro/Widget.hash.js"></astro-island>
+        <div class="terminal-line">DemoOS v1.2.3</div>
+      `,
+      source: "initial_response",
+    });
+
+    assert.equal(fingerprints.some((item) => item.kind === "framework" && item.name === "Astro"), true);
+    assert.equal(fingerprints.some((item) => item.kind === "framework" && item.name === "Preact"), true);
+    assert.equal(fingerprints.some((item) => item.kind === "software" && item.name === "DemoOS" && item.version === "1.2.3"), true);
+  });
+
   it("builds randomized same-origin 404 probe URLs", () => {
     const first = testing.build404ProbeUrl("https://example.com/app/page?q=1#top");
     const second = testing.build404ProbeUrl("https://example.com/app/page?q=1#top");

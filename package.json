@@ -1,6 +1,6 @@
 {
   "name": "openclaw-osint",
-  "version": "0.21.7",
+  "version": "0.21.8",
   "license": "MIT",
   "description": "Public-source OSINT helper tools for OpenClaw",
   "type": "module",

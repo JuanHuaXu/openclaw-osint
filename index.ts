@@ -81,7 +81,7 @@ export default defineToolPlugin({
       name: "osint_url_snapshot",
       label: "OSINT URL Snapshot",
       description:
-        "Fetch a public HTTP(S) URL through OpenClaw's SSRF guard and return bounded page metadata plus an untrusted excerpt.",
+        "Fetch a public HTTP(S) URL through OpenClaw's SSRF guard and return bounded page metadata, passive software/framework/OS fingerprint hints, and an untrusted excerpt.",
       parameters: UrlSnapshotSchema,
       execute: (params, _config, context) =>
         snapshotUrlForTool({ ...params, signal: context.signal }),
@@ -238,7 +238,7 @@ export default defineToolPlugin({
       name: "osint_pipeline_recon",
       label: "OSINT Pipeline Recon",
       description:
-        "Run bounded OSINT recon by effort level: light extracts indicators, medium enriches URLs/domains, high runs the broader safe lookup suite.",
+        "Run bounded OSINT recon by effort level: light extracts indicators, medium enriches URLs/domains with URL fingerprints, high runs the broader safe lookup suite.",
       parameters: PipelineReconSchema,
       execute: (params, _config, context) =>
         pipelineReconForTool({ ...params, signal: context.signal }),

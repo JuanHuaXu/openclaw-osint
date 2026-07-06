@@ -427,6 +427,9 @@ function fingerprintFromText(input: string, source: string): FingerprintEvidence
     [/id=["']__next["']|__NEXT_DATA__/i, frameworkEvidence("Next.js", source, "high")],
     [/data-reactroot|__REACT_DEVTOOLS_GLOBAL_HOOK__/i, frameworkEvidence("React", source, "medium")],
     [/id=["']root["'][\s\S]{0,300}<script[^>]+\/static\/js\/main\.[^"']+\.js/i, frameworkEvidence("Create React App-style frontend", source, "medium")],
+    [/astro-island|self\.Astro|\/_astro\//i, frameworkEvidence("Astro", source, "high")],
+    [/data-preact-island-id|preact/i, frameworkEvidence("Preact", source, "medium")],
+    [/\bthree(?:\.module)?\.js\b|\bfrom\s+["']three["']/i, frameworkEvidence("Three.js", source, "medium")],
     [/ng-version=["'][^"']+["']/i, frameworkEvidence("Angular", source, "high")],
     [/data-v-[a-f0-9]{6,}|id=["']app["'][\s\S]{0,500}\/assets\/[^"']+\.js/i, frameworkEvidence("Vue/Vite-style frontend", source, "low")],
     [/\/build\/assets\/[^"']+\.js/i, frameworkEvidence("Laravel/Vite-style frontend", source, "low")],
@@ -434,7 +437,7 @@ function fingerprintFromText(input: string, source: string): FingerprintEvidence
     [/\/sites\/default\/files\/|Drupal\.settings|data-drupal-selector/i, frameworkEvidence("Drupal", source, "high")],
     [/\/skin\/frontend\/|\/static\/version\d+\/frontend\//i, frameworkEvidence("Magento", source, "medium")],
   ];
-  return checks.flatMap(([pattern, base]) => {
+  const matched = checks.flatMap(([pattern, base]) => {
     const match = text.match(pattern);
     if (!match) {
       return [];
@@ -445,6 +448,22 @@ function fingerprintFromText(input: string, source: string): FingerprintEvidence
       evidence: [textSnippetAround(text, match.index ?? 0)],
     }];
   });
+  return [...matched, ...fingerprintAppVersionBanners(text, source)];
+}
+
+function fingerprintAppVersionBanners(input: string, source: string): FingerprintEvidence[] {
+  const text = input.slice(0, MAX_RESPONSE_BYTES);
+  const matches = Array.from(
+    text.matchAll(/\b([A-Za-z][A-Za-z0-9_.-]*(?:OS|App|CMS|Server|Framework|Site))\s+v([0-9]+(?:\.[0-9A-Za-z-]+){1,4})\b/g),
+  );
+  return matches.slice(0, 6).map((match) => ({
+    kind: "software",
+    name: match[1] ?? "application",
+    version: match[2] ?? undefined,
+    confidence: "medium",
+    source,
+    evidence: [textSnippetAround(text, match.index ?? 0)],
+  }));
 }
 
 function fingerprintFromCookies(value: string | undefined, source: string): FingerprintEvidence[] {
