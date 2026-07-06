@@ -280,6 +280,8 @@ Arguments:
 
 Fingerprint output is evidence, not proof. Treat OS detection as weak unless the server directly exposes it in a banner or error page.
 
+The tool returns passive fingerprint data under `fingerprint.fingerprints`, with optional 404 probe details under `fingerprint.errorProbe`. There is no top-level `fingerprints` array.
+
 When the Podman backend is enabled, the plugin runs the initial URL fetch inside a disposable worker container and attaches a tcpdump sidecar to that worker's network namespace. Returned capture data is summarized and bounded: DNS queries, remote TCP endpoint, SYN-to-SYN/ACK timing, retransmit count, payload byte counts, packet counts, and a small packet-line sample. Raw pcap data is not returned to the model. Redirect following is intentionally disabled in this backend so a target cannot bounce the worker into a private/internal address after preflight validation.
 
 ### `osint_pipeline_recon`
