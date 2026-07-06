@@ -388,10 +388,7 @@ function fingerprintFromHttpEvidence(params: {
   html: string;
   source: string;
 }): FingerprintEvidence[] {
-  const header = (name: string) =>
-    params.headers instanceof Headers
-      ? params.headers.get(name) ?? undefined
-      : params.headers[name.toLowerCase()] ?? params.headers[name];
+  const header = (name: string) => readHeader(params.headers, name);
   const evidence: FingerprintEvidence[] = [];
   const headerValues = [
     ["Server", header("server"), "medium"],
@@ -422,6 +419,18 @@ function fingerprintFromHttpEvidence(params: {
   }
   evidence.push(...fingerprintFromText(params.html, params.source));
   return evidence;
+}
+
+function readHeader(
+  headers: Headers | Record<string, string | undefined>,
+  name: string,
+): string | undefined {
+  const getter = (headers as { get?: unknown }).get;
+  if (typeof getter === "function") {
+    return getter.call(headers, name) ?? undefined;
+  }
+  const record = headers as Record<string, string | undefined>;
+  return record[name.toLowerCase()] ?? record[name];
 }
 
 function addHeaderFingerprint(

@@ -1,6 +1,6 @@
 {
   "id": "osint",
-  "version": "0.23.0",
+  "version": "0.23.1",
   "activation": {
     "onStartup": true
   },

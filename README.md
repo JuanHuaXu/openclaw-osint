@@ -1,6 +1,6 @@
 # OpenClaw OSINT
 
-MIT-licensed standalone OpenClaw plugin for bounded public-source OSINT helpers. Current package version: `0.23.0`.
+MIT-licensed standalone OpenClaw plugin for bounded public-source OSINT helpers. Current package version: `0.23.1`.
 
 This plugin is intentionally conservative. It provides useful public-source primitives without credentialed scraping, private data broker access, exploit checks, port scans, or shell execution.
 
@@ -12,7 +12,7 @@ Use it when an OpenClaw agent needs to extract indicators, snapshot public web p
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.23.0.tgz
+openclaw plugins install ./openclaw-osint-0.23.1.tgz
 ```
 
 Restart the OpenClaw gateway after installing or upgrading the plugin.

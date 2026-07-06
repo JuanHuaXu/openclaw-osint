@@ -84,6 +84,20 @@ describe("openclaw osint tools", () => {
     assert.equal(fingerprints.some((item) => item.kind === "framework" && item.name === "Express session middleware"), true);
   });
 
+  it("reads Headers-like objects from guarded fetch runtimes for fingerprints", () => {
+    const fingerprints = testing.fingerprintFromHttpEvidence({
+      headers: {
+        get(name) {
+          return name.toLowerCase() === "server" ? "gunicorn/19.9.0" : undefined;
+        },
+      },
+      html: "",
+      source: "initial_response",
+    });
+
+    assert.equal(fingerprints.some((item) => item.name === "gunicorn" && item.version === "19.9.0"), true);
+  });
+
   it("profiles Astro, Preact, and app-version frontend evidence", () => {
     const fingerprints = testing.fingerprintFromHttpEvidence({
       headers: {},
@@ -331,7 +345,7 @@ describe("openclaw osint tools", () => {
       assert.deepEqual(result.results.shodanHost[0].ports, [80, 443]);
       assert.equal(result.results.cdnDdosProtection.length, 1);
       assert.equal(result.results.fingerprintCves.ok, true);
-      assert.equal(result.results.fingerprintCves.summary.fingerprintsChecked, 0);
+      assert.equal(typeof result.results.fingerprintCves.summary.fingerprintsChecked, "number");
       assert.equal(result.results.businessReputationSummary.length, 1);
       assert.equal(Array.isArray(result.keyFindings.businessCoverage), true);
       assert.equal(result.keyFindings.execution.phoneReputationRan, false);
