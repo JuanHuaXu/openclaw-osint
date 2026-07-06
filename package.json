@@ -1,12 +1,13 @@
 {
   "name": "openclaw-osint",
-  "version": "0.22.0",
+  "version": "0.22.1",
   "license": "MIT",
   "description": "Public-source OSINT helper tools for OpenClaw",
   "type": "module",
   "main": "dist/index.js",
   "files": [
     "dist/",
+    "scripts/",
     "openclaw.plugin.json",
     "README.md",
     "LICENSE"
@@ -21,6 +22,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "setup:sidecar": "node scripts/setup-target-fetch-sidecar.mjs",
     "test": "npm run build && node --test test/*.test.mjs"
   },
   "dependencies": {

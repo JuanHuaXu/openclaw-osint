@@ -1,6 +1,6 @@
 # OpenClaw OSINT
 
-MIT-licensed standalone OpenClaw plugin for bounded public-source OSINT helpers. Current package version: `0.22.0`.
+MIT-licensed standalone OpenClaw plugin for bounded public-source OSINT helpers. Current package version: `0.22.1`.
 
 This plugin is intentionally conservative. It provides useful public-source primitives without credentialed scraping, private data broker access, exploit checks, port scans, or shell execution.
 
@@ -12,7 +12,7 @@ Use it when an OpenClaw agent needs to extract indicators, snapshot public web p
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.22.0.tgz
+openclaw plugins install ./openclaw-osint-0.22.1.tgz
 ```
 
 Restart the OpenClaw gateway after installing or upgrading the plugin.
@@ -22,6 +22,12 @@ Useful smoke checks:
 ```bash
 pnpm test
 openclaw plugins list
+```
+
+Optional sidecar smoke check for packet-capture URL snapshots:
+
+```bash
+npm run setup:sidecar
 ```
 
 Ask the agent for one of the pipeline shapes:
@@ -45,6 +51,79 @@ Most tools work without API keys. Keys unlock richer source coverage:
 - `OPENCLAW_OSINT_PODMAN_BIN`: override the Podman binary path when `podman` is not on `PATH`.
 
 No key is required for local indicator extraction, URL snapshots, passive software fingerprint hints, DNS/network enrichment, TLS certificate inspection, Wikidata/Wikipedia context, keyless Shodan InternetDB, or cache status.
+
+## Optional Target-Fetch Sidecar
+
+The Podman target-fetch backend is opt-in. It runs direct URL snapshot fetches inside a disposable worker container and attaches a tcpdump sidecar to that worker's network namespace. The plugin returns only a bounded summary; it does not write `.pcap` files.
+
+### Install Podman
+
+macOS:
+
+```bash
+brew install podman
+podman machine init --now
+podman run --rm quay.io/podman/hello
+```
+
+If your macOS Podman install uses Podman Desktop or a custom Homebrew prefix, set `OPENCLAW_OSINT_PODMAN_BIN` to the full `podman` path.
+
+WSL2:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y podman
+podman run --rm quay.io/podman/hello
+```
+
+If your distro requires a user service or rootless setup step, complete that first, then rerun the hello check.
+
+Linux:
+
+```bash
+# Debian / Ubuntu
+sudo apt-get update
+sudo apt-get install -y podman
+
+# Fedora
+sudo dnf install -y podman
+
+podman run --rm quay.io/podman/hello
+```
+
+### Prepare Images And Verify Capture
+
+From the plugin checkout or installed package directory:
+
+```bash
+npm run setup:sidecar
+```
+
+The setup check pulls:
+
+- `docker.io/curlimages/curl:latest` for the disposable fetch worker
+- `docker.io/nicolaka/netshoot:latest` for the tcpdump sidecar
+
+Then it creates a temporary Podman network, starts a worker and sidecar, fetches `https://example.com/`, verifies tcpdump saw packets, and removes the temporary containers/network.
+
+### Enable In OpenClaw
+
+Set these in the OpenClaw gateway environment, then restart the gateway:
+
+```bash
+OPENCLAW_OSINT_TARGET_FETCH_BACKEND=podman
+OPENCLAW_OSINT_PODMAN_BIN=podman
+```
+
+Use the absolute Podman path if `podman` is not on the gateway process `PATH`.
+
+### Operational Notes
+
+- No raw pcaps are persisted. The plugin reads bounded tcpdump text logs from the sidecar and removes the sidecar, worker, and temporary network in cleanup.
+- tcpdump runs with `-nn`, so it does not perform reverse DNS or service-name resolution.
+- Redirect following is disabled in the Podman backend so a public target cannot redirect the worker into a private/internal address after preflight validation.
+- The backend blocks localhost, `.local`, `.internal`, private, link-local, documentation, multicast, and other special-use targets before starting the container fetch.
+- If setup fails, leave `OPENCLAW_OSINT_TARGET_FETCH_BACKEND` unset; URL snapshots fall back to the normal OpenClaw SSRF-guarded fetch path.
 
 ## Flow
 
