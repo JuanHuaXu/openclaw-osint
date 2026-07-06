@@ -16,6 +16,7 @@ import { testing as publicKnowledgeTesting } from "../dist/src/public-knowledge.
 import { testing as reputationTesting } from "../dist/src/reputation.js";
 import { testing as shodanTesting } from "../dist/src/shodan.js";
 import { testing as tlsCertificateTesting } from "../dist/src/tls-certificate.js";
+import { testing as targetFetchTesting } from "../dist/src/target-fetch.js";
 import { testing } from "../dist/src/tools.js";
 
 describe("openclaw osint tools", () => {
@@ -106,6 +107,32 @@ describe("openclaw osint tools", () => {
     assert.match(first, /^https:\/\/example\.com\/__openclaw_osint_404_[a-f0-9]{32}$/);
     assert.match(second, /^https:\/\/example\.com\/__openclaw_osint_404_[a-f0-9]{32}$/);
     assert.notEqual(first, second);
+  });
+
+  it("summarizes tcpdump output from an isolated target fetch", () => {
+    const summary = targetFetchTesting.parseTcpdumpSummary(`
+      tcpdump: verbose output suppressed, use -v[v]... for full protocol decode
+      listening on eth0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+      1783308214.612615 IP 10.89.0.2.36128 > 10.89.0.1.53: 55773+ A? example.com. (29)
+      1783308214.614504 IP 10.89.0.2.34982 > 104.20.23.154.443: Flags [S], seq 3645541713, win 65480, length 0
+      1783308214.620353 IP 104.20.23.154.443 > 10.89.0.2.34982: Flags [S.], seq 4051852710, ack 3645541714, length 0
+      1783308214.622115 IP 10.89.0.2.34982 > 104.20.23.154.443: Flags [P.], seq 1:1563, ack 1, length 1562
+      1783308214.631009 IP 104.20.23.154.443 > 10.89.0.2.34982: Flags [P.], seq 1:2897, ack 1563, length 2896
+      20 packets captured
+      31 packets received by filter
+      0 packets dropped by kernel
+    `, "osint-pcap-test");
+
+    assert.equal(summary.backend, "podman");
+    assert.equal(summary.namespace, "osint-pcap-test");
+    assert.deepEqual(summary.dnsQueries, ["example.com"]);
+    assert.equal(summary.tcp.remoteIp, "104.20.23.154");
+    assert.equal(summary.tcp.remotePort, 443);
+    assert.equal(summary.tcp.synToSynAckMs, 6);
+    assert.equal(summary.payloadBytes.outbound, 1562);
+    assert.equal(summary.payloadBytes.inbound, 2896);
+    assert.equal(summary.packetsCaptured, 20);
+    assert.equal(summary.packetsDroppedByKernel, 0);
   });
 
   it("runs light pipeline recon as extraction only", async () => {

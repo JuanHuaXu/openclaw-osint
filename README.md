@@ -1,6 +1,6 @@
 # OpenClaw OSINT
 
-MIT-licensed standalone OpenClaw plugin for bounded public-source OSINT helpers. Current package version: `0.21.8`.
+MIT-licensed standalone OpenClaw plugin for bounded public-source OSINT helpers. Current package version: `0.22.0`.
 
 This plugin is intentionally conservative. It provides useful public-source primitives without credentialed scraping, private data broker access, exploit checks, port scans, or shell execution.
 
@@ -12,7 +12,7 @@ Use it when an OpenClaw agent needs to extract indicators, snapshot public web p
 pnpm install
 pnpm build
 pnpm pack
-openclaw plugins install ./openclaw-osint-0.21.8.tgz
+openclaw plugins install ./openclaw-osint-0.22.0.tgz
 ```
 
 Restart the OpenClaw gateway after installing or upgrading the plugin.
@@ -41,6 +41,8 @@ Most tools work without API keys. Keys unlock richer source coverage:
 - `COMPANIES_HOUSE_API_KEY` or `UK_COMPANIES_HOUSE_API_KEY`: UK Companies House API lookup.
 - `ABN_LOOKUP_GUID` or `AU_ABN_LOOKUP_GUID`: Australian ABN Lookup API.
 - `OPENCLAW_OSINT_DB_PATH`: override the SQLite cache path.
+- `OPENCLAW_OSINT_TARGET_FETCH_BACKEND=podman`: run direct URL snapshot fetches inside an isolated Podman worker namespace and return a bounded tcpdump-derived packet summary.
+- `OPENCLAW_OSINT_PODMAN_BIN`: override the Podman binary path when `podman` is not on `PATH`.
 
 No key is required for local indicator extraction, URL snapshots, passive software fingerprint hints, DNS/network enrichment, TLS certificate inspection, Wikidata/Wikipedia context, keyless Shodan InternetDB, or cache status.
 
@@ -188,6 +190,7 @@ Fetches one public HTTP(S) URL through OpenClaw's SSRF guard and returns bounded
 - bounded body excerpt wrapped as untrusted external content
 - optional passive software/framework/OS hints from headers, cookies, page markers, and one randomized same-origin 404 probe
 - bounded 404 error-page excerpt when fingerprinting is enabled
+- optional `networkCapture` summary when `OPENCLAW_OSINT_TARGET_FETCH_BACKEND=podman` is enabled
 
 Arguments:
 
@@ -197,6 +200,8 @@ Arguments:
 - `maxErrorProbeChars`: cap for the 404 probe excerpt
 
 Fingerprint output is evidence, not proof. Treat OS detection as weak unless the server directly exposes it in a banner or error page.
+
+When the Podman backend is enabled, the plugin runs the initial URL fetch inside a disposable worker container and attaches a tcpdump sidecar to that worker's network namespace. Returned capture data is summarized and bounded: DNS queries, remote TCP endpoint, SYN-to-SYN/ACK timing, retransmit count, payload byte counts, packet counts, and a small packet-line sample. Raw pcap data is not returned to the model. Redirect following is intentionally disabled in this backend so a target cannot bounce the worker into a private/internal address after preflight validation.
 
 ### `osint_pipeline_recon`
 

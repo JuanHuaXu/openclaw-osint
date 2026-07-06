@@ -2,6 +2,7 @@ import { wrapWebContent } from "openclaw/plugin-sdk/security-runtime";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import { randomUUID } from "node:crypto";
 import { Type, type Static } from "typebox";
+import { fetchTargetWithOptionalCapture, type NetworkCaptureSummary } from "./target-fetch.js";
 
 const DEFAULT_MAX_TEXT_CHARS = 20_000;
 const MAX_TEXT_CHARS = 100_000;
@@ -78,6 +79,7 @@ type UrlSnapshotResult =
       description?: string;
       canonicalUrl?: string;
       fingerprint?: PassiveFingerprintResult;
+      networkCapture?: NetworkCaptureSummary;
       excerpt: string;
       truncated: boolean;
     }
@@ -169,6 +171,29 @@ async function snapshotUrl(params: {
     return { ok: false, error: "Expected a public HTTP(S) URL." };
   }
 
+  const captured = await fetchTargetWithOptionalCapture({
+    url: normalizedUrl,
+    timeoutMs: FETCH_TIMEOUT_MS,
+    signal: params.signal,
+  });
+  if (captured) {
+    if (!captured.ok) {
+      return captured;
+    }
+    return snapshotFromFetchedTarget({
+      normalizedUrl,
+      finalUrl: captured.finalUrl,
+      status: captured.status,
+      headers: captured.headers,
+      body: captured.body,
+      networkCapture: captured.networkCapture,
+      maxExcerptChars: params.maxExcerptChars,
+      includeFingerprint: params.includeFingerprint,
+      maxErrorProbeChars: params.maxErrorProbeChars,
+      signal: params.signal,
+    });
+  }
+
   let guarded;
   try {
     guarded = await fetchWithSsrFGuard({
@@ -191,33 +216,17 @@ async function snapshotUrl(params: {
   try {
     const contentType = response.headers.get("content-type") ?? undefined;
     const body = await readResponseTextBounded(response, MAX_RESPONSE_BYTES);
-    const metadata = parseHtmlMetadata(body, finalUrl);
-    const visibleText = htmlToVisibleText(body).slice(0, params.maxExcerptChars);
-    const fingerprint = params.includeFingerprint
-      ? await buildPassiveFingerprint({
-        normalizedUrl,
-        finalUrl,
-        response,
-        body,
-        maxErrorProbeChars: params.maxErrorProbeChars,
-        signal: params.signal,
-      })
-      : undefined;
-    return {
-      ok: true,
+    return snapshotFromFetchedTarget({
       url: normalizedUrl,
       finalUrl,
       status: response.status,
-      ...(contentType ? { contentType } : {}),
-      ...(metadata.title ? { title: wrapWebContent(metadata.title, "web_fetch") } : {}),
-      ...(metadata.description
-        ? { description: wrapWebContent(metadata.description, "web_fetch") }
-        : {}),
-      ...(metadata.canonicalUrl ? { canonicalUrl: metadata.canonicalUrl } : {}),
-      ...(fingerprint ? { fingerprint } : {}),
-      excerpt: wrapWebContent(visibleText, "web_fetch"),
-      truncated: body.length >= MAX_RESPONSE_BYTES || visibleText.length >= params.maxExcerptChars,
-    };
+      headers: response.headers,
+      body,
+      maxExcerptChars: params.maxExcerptChars,
+      includeFingerprint: params.includeFingerprint,
+      maxErrorProbeChars: params.maxErrorProbeChars,
+      signal: params.signal,
+    });
   } catch (error) {
     return { ok: false, url: normalizedUrl, error: formatError(error) };
   } finally {
@@ -225,16 +234,60 @@ async function snapshotUrl(params: {
   }
 }
 
+async function snapshotFromFetchedTarget(params: {
+  normalizedUrl?: string;
+  url?: string;
+  finalUrl: string;
+  status: number;
+  headers: Headers;
+  body: string;
+  networkCapture?: NetworkCaptureSummary;
+  maxExcerptChars: number;
+  includeFingerprint: boolean;
+  maxErrorProbeChars: number;
+  signal?: AbortSignal;
+}): Promise<UrlSnapshotResult> {
+  const contentType = params.headers.get("content-type") ?? undefined;
+  const metadata = parseHtmlMetadata(params.body, params.finalUrl);
+  const visibleText = htmlToVisibleText(params.body).slice(0, params.maxExcerptChars);
+  const fingerprint = params.includeFingerprint
+    ? await buildPassiveFingerprint({
+      normalizedUrl: params.normalizedUrl ?? params.url ?? params.finalUrl,
+      finalUrl: params.finalUrl,
+      headers: params.headers,
+      body: params.body,
+      maxErrorProbeChars: params.maxErrorProbeChars,
+      signal: params.signal,
+    })
+    : undefined;
+  return {
+    ok: true,
+    url: params.url ?? params.normalizedUrl ?? params.finalUrl,
+    finalUrl: params.finalUrl,
+    status: params.status,
+    ...(contentType ? { contentType } : {}),
+    ...(metadata.title ? { title: wrapWebContent(metadata.title, "web_fetch") } : {}),
+    ...(metadata.description
+      ? { description: wrapWebContent(metadata.description, "web_fetch") }
+      : {}),
+    ...(metadata.canonicalUrl ? { canonicalUrl: metadata.canonicalUrl } : {}),
+    ...(fingerprint ? { fingerprint } : {}),
+    ...(params.networkCapture ? { networkCapture: params.networkCapture } : {}),
+    excerpt: wrapWebContent(visibleText, "web_fetch"),
+    truncated: params.body.length >= MAX_RESPONSE_BYTES || visibleText.length >= params.maxExcerptChars,
+  };
+}
+
 async function buildPassiveFingerprint(params: {
   normalizedUrl: string;
   finalUrl: string;
-  response: Response;
+  headers: Headers;
   body: string;
   maxErrorProbeChars: number;
   signal?: AbortSignal;
 }): Promise<PassiveFingerprintResult> {
   const fingerprints = fingerprintFromHttpEvidence({
-    headers: params.response.headers,
+    headers: params.headers,
     html: params.body,
     source: "initial_response",
   });
@@ -265,6 +318,23 @@ async function fetch404FingerprintProbe(params: {
   const probeUrl = build404ProbeUrl(params.baseUrl);
   if (!probeUrl) {
     return undefined;
+  }
+  const captured = await fetchTargetWithOptionalCapture({
+    url: probeUrl,
+    timeoutMs: FETCH_TIMEOUT_MS,
+    signal: params.signal,
+  });
+  if (captured) {
+    if (!captured.ok) {
+      return undefined;
+    }
+    return {
+      url: captured.finalUrl,
+      status: captured.status,
+      ...(captured.headers.get("content-type") ? { contentType: captured.headers.get("content-type") ?? undefined } : {}),
+      headers: captured.headers,
+      body: captured.body.slice(0, Math.min(params.maxChars * 4, MAX_RESPONSE_BYTES)),
+    };
   }
   let guarded;
   try {
